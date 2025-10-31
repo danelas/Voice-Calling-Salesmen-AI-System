@@ -40,10 +40,12 @@ git commit -m "Initial commit: Voice Sales AI System
 - Complete documentation and troubleshooting guides"
 ```
 
-### 6. Push to GitHub
+### 6. Push to GitHub (MAIN BRANCH - NOT MASTER)
 ```bash
-# Push to main branch
+# Set default branch to main (not master)
 git branch -M main
+
+# Push to main branch and set upstream
 git push -u origin main
 ```
 
