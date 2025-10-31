@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: voice-sales-ai
+    env: node
+    plan: starter
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: voice-sales-ai-db
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ELEVENLABS_VOICE_ID
+        sync: false
+      - key: TEXTMAGIC_USERNAME
+        sync: false
+      - key: TEXTMAGIC_API_KEY
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+    healthCheckPath: /api/health
+
+databases:
+  - name: voice-sales-ai-db
+    databaseName: voice_sales_ai
+    user: voice_sales_ai_user
+    plan: starter

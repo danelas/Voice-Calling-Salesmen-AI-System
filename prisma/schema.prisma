@@ -1,0 +1,163 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Lead {
+  id          String   @id @default(cuid())
+  firstName   String
+  lastName    String
+  email       String?
+  phone       String   @unique
+  company     String?
+  industry    String?
+  status      LeadStatus @default(NEW)
+  source      String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  calls       Call[]
+  
+  @@map("leads")
+}
+
+model Call {
+  id              String      @id @default(cuid())
+  leadId          String
+  status          CallStatus  @default(SCHEDULED)
+  scheduledAt     DateTime?
+  startedAt       DateTime?
+  endedAt         DateTime?
+  duration        Int?        // in seconds
+  outcome         CallOutcome?
+  sentiment       String?     // POSITIVE, NEUTRAL, NEGATIVE
+  confidence      Float?      // 0-1 confidence score
+  transcript      String?
+  audioUrl        String?
+  notes           String?
+  followUpDate    DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  
+  lead            Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  interactions    Interaction[]
+  analytics       CallAnalytics?
+  
+  @@map("calls")
+}
+
+model Interaction {
+  id          String          @id @default(cuid())
+  callId      String
+  type        InteractionType
+  speaker     Speaker
+  content     String
+  timestamp   DateTime
+  duration    Int?            // in milliseconds
+  confidence  Float?
+  sentiment   String?
+  createdAt   DateTime        @default(now())
+  
+  call        Call            @relation(fields: [callId], references: [id], onDelete: Cascade)
+  
+  @@map("interactions")
+}
+
+model CallAnalytics {
+  id                    String   @id @default(cuid())
+  callId                String   @unique
+  talkTime              Int      // AI talk time in seconds
+  listenTime            Int      // Customer talk time in seconds
+  interruptionCount     Int      @default(0)
+  questionCount         Int      @default(0)
+  objectionCount        Int      @default(0)
+  positiveKeywords      String[] // Array of positive keywords detected
+  negativeKeywords      String[] // Array of negative keywords detected
+  emotionalTone         String?  // Overall emotional tone
+  engagementScore       Float?   // 0-1 engagement score
+  conversionProbability Float?   // 0-1 probability of conversion
+  improvementSuggestions String[]
+  createdAt             DateTime @default(now())
+  
+  call                  Call     @relation(fields: [callId], references: [id], onDelete: Cascade)
+  
+  @@map("call_analytics")
+}
+
+model SalesScript {
+  id          String   @id @default(cuid())
+  name        String
+  industry    String?
+  scenario    String   // COLD_CALL, FOLLOW_UP, OBJECTION_HANDLING, etc.
+  content     String
+  variables   Json?    // Dynamic variables for personalization
+  isActive    Boolean  @default(true)
+  successRate Float?   // Success rate when using this script
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("sales_scripts")
+}
+
+model SystemSettings {
+  id                    String   @id @default(cuid())
+  key                   String   @unique
+  value                 String
+  description           String?
+  updatedAt             DateTime @updatedAt
+  
+  @@map("system_settings")
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL_SENT
+  NEGOTIATION
+  CLOSED_WON
+  CLOSED_LOST
+  NURTURING
+}
+
+enum CallStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum CallOutcome {
+  INTERESTED
+  NOT_INTERESTED
+  CALLBACK_REQUESTED
+  MEETING_SCHEDULED
+  SALE_MADE
+  VOICEMAIL
+  NO_ANSWER
+  WRONG_NUMBER
+}
+
+enum InteractionType {
+  GREETING
+  PITCH
+  QUESTION
+  OBJECTION_HANDLING
+  CLOSING
+  FOLLOW_UP
+  OTHER
+}
+
+enum Speaker {
+  AI
+  CUSTOMER
+}
