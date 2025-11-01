@@ -1,22 +1,30 @@
 services:
   - type: web
     name: voice-sales-ai
-    env: node
+    runtime: docker
     plan: starter
-    buildCommand: npm install && npx prisma generate && npm run build
+    region: virginia
+    branch: main
+    buildCommand: echo "Building with Docker..."
     startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        fromDatabase:
-          name: voice-sales-ai-db
-          property: connectionString
+        value: postgresql://aivoicecall_user:iupGwJfXz1yU2e9oKcV9Bjx9JueSdUxW@dpg-d42kvc24d50c739qvgc0-a.virginia-postgres.render.com/aivoicecall
+      - key: PORT
+        value: 3001
       - key: OPENAI_API_KEY
         sync: false
       - key: ELEVENLABS_API_KEY
         sync: false
       - key: ELEVENLABS_VOICE_ID
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
         sync: false
       - key: TEXTMAGIC_USERNAME
         sync: false
@@ -26,8 +34,4 @@ services:
         generateValue: true
     healthCheckPath: /api/health
 
-databases:
-  - name: voice-sales-ai-db
-    databaseName: voice_sales_ai
-    user: voice_sales_ai_user
-    plan: starter
+# Using external PostgreSQL database - no need for Render database service

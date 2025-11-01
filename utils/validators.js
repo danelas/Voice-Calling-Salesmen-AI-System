@@ -94,7 +94,195 @@ function validateLeadData(leadData) {
     }
   }
 
-  // Optional fields
+  // Personal Information
+  if (leadData.middleInitial) {
+    validated.middleInitial = leadData.middleInitial.trim().substring(0, 1);
+  }
+
+  if (leadData.exactAge !== undefined && leadData.exactAge !== null) {
+    const age = parseInt(leadData.exactAge);
+    if (isNaN(age) || age < 18 || age > 120) {
+      errors.push('Age must be a valid number between 18 and 120');
+    } else {
+      validated.exactAge = age;
+    }
+  }
+
+  // Contact Information
+  if (leadData.phoneType) {
+    validated.phoneType = leadData.phoneType.trim();
+  }
+
+  // Address fields
+  if (leadData.address) {
+    validated.address = leadData.address.trim();
+  }
+  if (leadData.city) {
+    validated.city = leadData.city.trim();
+  }
+  if (leadData.state) {
+    validated.state = leadData.state.trim();
+  }
+  if (leadData.zipCode) {
+    validated.zipCode = leadData.zipCode.trim();
+  }
+  if (leadData.zipCodePlus4) {
+    validated.zipCodePlus4 = leadData.zipCodePlus4.trim();
+  }
+
+  // Geographic coordinates
+  if (leadData.latitude !== undefined && leadData.latitude !== null) {
+    const lat = parseFloat(leadData.latitude);
+    if (isNaN(lat) || lat < -90 || lat > 90) {
+      errors.push('Latitude must be a valid number between -90 and 90');
+    } else {
+      validated.latitude = lat;
+    }
+  }
+
+  if (leadData.longitude !== undefined && leadData.longitude !== null) {
+    const lng = parseFloat(leadData.longitude);
+    if (isNaN(lng) || lng < -180 || lng > 180) {
+      errors.push('Longitude must be a valid number between -180 and 180');
+    } else {
+      validated.longitude = lng;
+    }
+  }
+
+  // Property Information
+  if (leadData.homeValue !== undefined && leadData.homeValue !== null) {
+    const value = parseFloat(leadData.homeValue);
+    if (isNaN(value) || value < 0) {
+      errors.push('Home value must be a valid positive number');
+    } else {
+      validated.homeValue = value;
+    }
+  }
+
+  if (leadData.yearBuilt !== undefined && leadData.yearBuilt !== null) {
+    const year = parseInt(leadData.yearBuilt);
+    const currentYear = new Date().getFullYear();
+    if (isNaN(year) || year < 1800 || year > currentYear) {
+      errors.push(`Year built must be between 1800 and ${currentYear}`);
+    } else {
+      validated.yearBuilt = year;
+    }
+  }
+
+  if (leadData.purchasePrice !== undefined && leadData.purchasePrice !== null) {
+    const price = parseFloat(leadData.purchasePrice);
+    if (isNaN(price) || price < 0) {
+      errors.push('Purchase price must be a valid positive number');
+    } else {
+      validated.purchasePrice = price;
+    }
+  }
+
+  if (leadData.homePurchaseDate) {
+    const date = new Date(leadData.homePurchaseDate);
+    if (isNaN(date.getTime())) {
+      errors.push('Home purchase date must be a valid date');
+    } else {
+      validated.homePurchaseDate = leadData.homePurchaseDate;
+    }
+  }
+
+  if (leadData.yearsInResidence !== undefined && leadData.yearsInResidence !== null) {
+    const years = parseInt(leadData.yearsInResidence);
+    if (isNaN(years) || years < 0 || years > 100) {
+      errors.push('Years in residence must be a valid number between 0 and 100');
+    } else {
+      validated.yearsInResidence = years;
+    }
+  }
+
+  if (leadData.propertyType) {
+    validated.propertyType = leadData.propertyType.trim();
+  }
+
+  // Financial Information
+  if (leadData.mostRecentMortgageDate) {
+    const date = new Date(leadData.mostRecentMortgageDate);
+    if (isNaN(date.getTime())) {
+      errors.push('Most recent mortgage date must be a valid date');
+    } else {
+      validated.mostRecentMortgageDate = leadData.mostRecentMortgageDate;
+    }
+  }
+
+  if (leadData.mostRecentMortgageAmount !== undefined && leadData.mostRecentMortgageAmount !== null) {
+    const amount = parseFloat(leadData.mostRecentMortgageAmount);
+    if (isNaN(amount) || amount < 0) {
+      errors.push('Most recent mortgage amount must be a valid positive number');
+    } else {
+      validated.mostRecentMortgageAmount = amount;
+    }
+  }
+
+  if (leadData.loanToValue !== undefined && leadData.loanToValue !== null) {
+    const ltv = parseFloat(leadData.loanToValue);
+    if (isNaN(ltv) || ltv < 0 || ltv > 2) {
+      errors.push('Loan to value must be a valid number between 0 and 2');
+    } else {
+      validated.loanToValue = ltv;
+    }
+  }
+
+  if (leadData.estimatedIncome !== undefined && leadData.estimatedIncome !== null) {
+    const income = parseFloat(leadData.estimatedIncome);
+    if (isNaN(income) || income < 0) {
+      errors.push('Estimated income must be a valid positive number');
+    } else {
+      validated.estimatedIncome = income;
+    }
+  }
+
+  if (leadData.estimatedIncomeCode) {
+    validated.estimatedIncomeCode = leadData.estimatedIncomeCode.trim();
+  }
+
+  // Personal Demographics
+  if (leadData.maritalStatus) {
+    validated.maritalStatus = leadData.maritalStatus.trim();
+  }
+
+  if (leadData.presenceOfChildren !== undefined && leadData.presenceOfChildren !== null) {
+    validated.presenceOfChildren = Boolean(leadData.presenceOfChildren);
+  }
+
+  if (leadData.numberOfChildren !== undefined && leadData.numberOfChildren !== null) {
+    const children = parseInt(leadData.numberOfChildren);
+    if (isNaN(children) || children < 0 || children > 20) {
+      errors.push('Number of children must be a valid number between 0 and 20');
+    } else {
+      validated.numberOfChildren = children;
+    }
+  }
+
+  if (leadData.education) {
+    validated.education = leadData.education.trim();
+  }
+
+  if (leadData.occupation) {
+    validated.occupation = leadData.occupation.trim();
+  }
+
+  if (leadData.language) {
+    const lang = leadData.language.trim().toLowerCase();
+    // Basic language code validation (2-3 characters)
+    if (!/^[a-z]{2,3}$/.test(lang)) {
+      errors.push('Language must be a valid language code (e.g., en, es, fr)');
+    } else {
+      validated.language = lang;
+    }
+  }
+
+  // Compliance
+  if (leadData.dncStatus !== undefined && leadData.dncStatus !== null) {
+    validated.dncStatus = Boolean(leadData.dncStatus);
+  }
+
+  // Business fields
   if (leadData.company) {
     validated.company = leadData.company.trim();
   }

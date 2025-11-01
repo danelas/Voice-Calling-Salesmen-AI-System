@@ -1,5 +1,13 @@
-# Use Node.js 18 LTS
-FROM node:18-alpine
+# Use Node.js 18 LTS (slim version for better compatibility)
+FROM node:18-slim
+
+# Install system dependencies needed for native modules
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -7,8 +15,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install dependencies with verbose logging
+RUN npm ci --verbose
 
 # Copy Prisma schema
 COPY prisma ./prisma/
@@ -19,15 +27,16 @@ RUN npx prisma generate
 # Copy application code
 COPY . .
 
-# Create audio directory
-RUN mkdir -p audio
+# Create necessary directories with proper permissions
+RUN mkdir -p audio temp logs && \
+    chmod 755 audio temp logs
 
 # Expose port
 EXPOSE 3001
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3001/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
+# Simple health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD curl -f http://localhost:3001/api/health || exit 1
 
 # Start the application
 CMD ["npm", "start"]

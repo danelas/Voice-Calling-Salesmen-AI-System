@@ -29,15 +29,16 @@ class OpenAIService {
    */
   async generateSalesResponse(conversationHistory, leadInfo, context = '') {
     try {
+      // Build comprehensive lead profile for AI context
+      const leadProfile = this.buildLeadProfile(leadInfo);
+      
       const systemPrompt = `${this.salesPersona}
       
-      Lead Information:
-      - Name: ${leadInfo.firstName} ${leadInfo.lastName}
-      - Company: ${leadInfo.company || 'Not specified'}
-      - Industry: ${leadInfo.industry || 'Not specified'}
-      - Previous interactions: ${leadInfo.previousCalls || 0} calls
+      ${leadProfile}
       
       Context: ${context}
+      
+      IMPORTANT: Use this detailed information to personalize your conversation. Reference their location, property details, and personal information naturally when relevant. If they speak a language other than English, acknowledge this and offer to continue in their preferred language if needed.
       
       Respond naturally as if you're speaking on the phone. Keep responses under 100 words for natural conversation flow.`;
 
@@ -136,15 +137,18 @@ class OpenAIService {
    */
   async handleObjection(objection, leadInfo) {
     try {
+      const leadProfile = this.buildLeadProfile(leadInfo);
+      
       const objectionPrompt = `You're a sales expert handling this objection: "${objection}"
       
-      Lead info: ${leadInfo.firstName} from ${leadInfo.company || 'their company'}
+      ${leadProfile}
       
       Provide a professional, empathetic response that:
       1. Acknowledges their concern
-      2. Provides a thoughtful counter-argument or solution
-      3. Asks a follow-up question to keep the conversation going
+      2. Uses their specific situation (property details, financial info) to provide a relevant counter-argument
+      3. Asks a follow-up question that references their personal details
       
+      If they speak a language other than English, acknowledge this appropriately.
       Keep it conversational and under 80 words.`;
 
       const completion = await this.client.chat.completions.create({
@@ -269,26 +273,27 @@ class OpenAIService {
    */
   async generatePersonalizedScript(leadInfo, callType = 'cold') {
     try {
+      const leadProfile = this.buildLeadProfile(leadInfo);
+      
       const scriptPrompt = `Generate a personalized sales script for a ${callType} call:
       
-      Lead Information:
-      - Name: ${leadInfo.firstName} ${leadInfo.lastName}
-      - Company: ${leadInfo.company || 'Not specified'}
-      - Industry: ${leadInfo.industry || 'Not specified'}
-      - Source: ${leadInfo.source || 'Not specified'}
+      ${leadProfile}
       
-      Create a natural, conversational script with:
-      1. Personalized opening
-      2. Value proposition relevant to their industry
-      3. 2-3 discovery questions
+      Create a natural, conversational script that incorporates their specific details:
+      1. Personalized opening that references their location or property details
+      2. Value proposition relevant to their situation (homeowner, mortgage balance, years owned)
+      3. 2-3 discovery questions that build on what we know
       4. Soft close or next step
+      
+      If they speak a language other than English, note this in the opening.
       
       Format as JSON:
       {
         "opening": "personalized opening line",
-        "valueProposition": "relevant value prop",
+        "valueProposition": "relevant value prop based on their property/financial situation",
         "discoveryQuestions": ["question1", "question2", "question3"],
-        "close": "soft close or next step"
+        "close": "soft close or next step",
+        "languageNotes": "any language considerations"
       }`;
 
       const completion = await this.client.chat.completions.create({
@@ -322,6 +327,116 @@ class OpenAIService {
       console.error('Script Generation Error:', error);
       throw new Error(`Failed to generate personalized script: ${error.message}`);
     }
+  }
+
+  /**
+   * Build comprehensive lead profile for AI context
+   * @param {Object} leadInfo - Lead information from database
+   * @returns {string} Formatted lead profile
+   */
+  buildLeadProfile(leadInfo) {
+    const profile = [];
+    
+    // Personal Information
+    profile.push(`COMPREHENSIVE LEAD PROFILE:`);
+    const fullName = [leadInfo.firstName, leadInfo.middleInitial, leadInfo.lastName].filter(Boolean).join(' ');
+    profile.push(`Name: ${fullName}`);
+    if (leadInfo.exactAge) profile.push(`Age: ${leadInfo.exactAge} years old`);
+    if (leadInfo.language && leadInfo.language !== 'en') {
+      profile.push(`Preferred Language: ${this.getLanguageName(leadInfo.language)} (${leadInfo.language})`);
+    }
+    
+    // Contact Information
+    profile.push(`Phone: ${leadInfo.phone}${leadInfo.phoneType ? ` (${leadInfo.phoneType})` : ''}`);
+    if (leadInfo.email) profile.push(`Email: ${leadInfo.email}`);
+    
+    // Address Information
+    if (leadInfo.address || leadInfo.city || leadInfo.state) {
+      const addressParts = [];
+      if (leadInfo.address) addressParts.push(leadInfo.address);
+      if (leadInfo.city) addressParts.push(leadInfo.city);
+      if (leadInfo.state) addressParts.push(leadInfo.state);
+      if (leadInfo.zipCode) {
+        const zip = leadInfo.zipCodePlus4 ? `${leadInfo.zipCode}-${leadInfo.zipCodePlus4}` : leadInfo.zipCode;
+        addressParts.push(zip);
+      }
+      profile.push(`Address: ${addressParts.join(', ')}`);
+    }
+    
+    // Property Information
+    if (leadInfo.homeValue) {
+      profile.push(`Home Value (Assessed): $${leadInfo.homeValue.toLocaleString()}`);
+    }
+    if (leadInfo.yearBuilt) {
+      const homeAge = new Date().getFullYear() - leadInfo.yearBuilt;
+      profile.push(`Home Built: ${leadInfo.yearBuilt} (${homeAge} years old)`);
+    }
+    if (leadInfo.propertyType) profile.push(`Property Type: ${leadInfo.propertyType}`);
+    if (leadInfo.yearsInResidence) {
+      profile.push(`Years in Current Residence: ${leadInfo.yearsInResidence} years`);
+    }
+    if (leadInfo.purchasePrice && leadInfo.homePurchaseDate) {
+      const purchaseYear = new Date(leadInfo.homePurchaseDate).getFullYear();
+      profile.push(`Purchase Info: Bought for $${leadInfo.purchasePrice.toLocaleString()} in ${purchaseYear}`);
+    }
+    
+    // Financial Information
+    if (leadInfo.mostRecentMortgageAmount && leadInfo.mostRecentMortgageDate) {
+      const mortgageYear = new Date(leadInfo.mostRecentMortgageDate).getFullYear();
+      profile.push(`Recent Mortgage: $${leadInfo.mostRecentMortgageAmount.toLocaleString()} (${mortgageYear})`);
+    }
+    if (leadInfo.loanToValue) {
+      profile.push(`Loan-to-Value Ratio: ${(leadInfo.loanToValue * 100).toFixed(1)}%`);
+    }
+    if (leadInfo.estimatedIncome) {
+      profile.push(`Estimated Annual Income: $${leadInfo.estimatedIncome.toLocaleString()}`);
+    }
+    
+    // Personal Demographics
+    if (leadInfo.maritalStatus) profile.push(`Marital Status: ${leadInfo.maritalStatus}`);
+    if (leadInfo.presenceOfChildren) {
+      const childrenInfo = leadInfo.numberOfChildren ? 
+        `Has ${leadInfo.numberOfChildren} children` : 'Has children';
+      profile.push(`Family: ${childrenInfo}`);
+    }
+    if (leadInfo.education) profile.push(`Education: ${leadInfo.education}`);
+    if (leadInfo.occupation) profile.push(`Occupation: ${leadInfo.occupation}`);
+    
+    // Business Information
+    if (leadInfo.company) profile.push(`Company: ${leadInfo.company}`);
+    if (leadInfo.industry) profile.push(`Industry: ${leadInfo.industry}`);
+    
+    // Compliance
+    if (leadInfo.dncStatus) profile.push(`⚠️ DNC Status: Do Not Call - HANDLE WITH CARE`);
+    
+    // Lead Management Info
+    profile.push(`Lead Status: ${leadInfo.status}`);
+    if (leadInfo.source) profile.push(`Lead Source: ${leadInfo.source}`);
+    if (leadInfo.notes) profile.push(`Notes: ${leadInfo.notes}`);
+    
+    return profile.join('\n');
+  }
+
+  /**
+   * Get full language name from language code
+   * @param {string} langCode - Language code (e.g., 'es', 'fr')
+   * @returns {string} Full language name
+   */
+  getLanguageName(langCode) {
+    const languages = {
+      'es': 'Spanish',
+      'fr': 'French',
+      'de': 'German',
+      'it': 'Italian',
+      'pt': 'Portuguese',
+      'zh': 'Chinese',
+      'ja': 'Japanese',
+      'ko': 'Korean',
+      'ar': 'Arabic',
+      'hi': 'Hindi',
+      'ru': 'Russian'
+    };
+    return languages[langCode] || langCode.toUpperCase();
   }
 }
 

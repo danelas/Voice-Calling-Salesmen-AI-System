@@ -1,0 +1,19 @@
+{
+  "firstName": "Maria",
+  "lastName": "Rodriguez",
+  "email": "maria.rodriguez@email.com",
+  "phone": "+1-555-123-4567",
+  "address": "1234 Oak Street",
+  "city": "Miami",
+  "state": "FL",
+  "zipCode": "33101",
+  "mortgageBalance": 285000,
+  "yearsOwned": 8,
+  "propertyValue": 450000,
+  "age": 42,
+  "language": "es",
+  "company": "Rodriguez Consulting",
+  "industry": "Business Consulting",
+  "source": "Online Lead Form",
+  "notes": "Interested in refinancing options, mentioned wanting to reduce monthly payments"
+}

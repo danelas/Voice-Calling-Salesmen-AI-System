@@ -10,12 +10,57 @@ const prisma = new PrismaClient();
 router.post('/', async (req, res) => {
   try {
     const {
+      // Personal Information
       firstName,
+      middleInitial,
       lastName,
+      exactAge,
       email,
+      
+      // Contact Information
       phone,
+      phoneType,
+      
+      // Address Information
+      address,
+      city,
+      state,
+      zipCode,
+      zipCodePlus4,
+      latitude,
+      longitude,
+      
+      // Property Information
+      homeValue,
+      yearBuilt,
+      purchasePrice,
+      homePurchaseDate,
+      yearsInResidence,
+      propertyType,
+      
+      // Financial Information
+      mostRecentMortgageDate,
+      mostRecentMortgageAmount,
+      loanToValue,
+      estimatedIncome,
+      estimatedIncomeCode,
+      
+      // Personal Demographics
+      maritalStatus,
+      presenceOfChildren,
+      numberOfChildren,
+      education,
+      occupation,
+      language,
+      
+      // Compliance
+      dncStatus,
+      
+      // Business Information
       company,
       industry,
+      
+      // Lead Management
       source,
       notes
     } = req.body;
@@ -46,12 +91,57 @@ router.post('/', async (req, res) => {
 
     const lead = await prisma.lead.create({
       data: {
+        // Personal Information
         firstName,
+        middleInitial,
         lastName,
+        exactAge,
         email,
+        
+        // Contact Information
         phone,
+        phoneType,
+        
+        // Address Information
+        address,
+        city,
+        state,
+        zipCode,
+        zipCodePlus4,
+        latitude,
+        longitude,
+        
+        // Property Information
+        homeValue,
+        yearBuilt,
+        purchasePrice,
+        homePurchaseDate: homePurchaseDate ? new Date(homePurchaseDate) : null,
+        yearsInResidence,
+        propertyType,
+        
+        // Financial Information
+        mostRecentMortgageDate: mostRecentMortgageDate ? new Date(mostRecentMortgageDate) : null,
+        mostRecentMortgageAmount,
+        loanToValue,
+        estimatedIncome,
+        estimatedIncomeCode,
+        
+        // Personal Demographics
+        maritalStatus,
+        presenceOfChildren,
+        numberOfChildren,
+        education,
+        occupation,
+        language,
+        
+        // Compliance
+        dncStatus,
+        
+        // Business Information
         company,
         industry,
+        
+        // Lead Management
         source,
         notes,
         status: 'NEW'

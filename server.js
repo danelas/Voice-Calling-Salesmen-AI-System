@@ -18,6 +18,8 @@ const leadRoutes = require('./routes/leads');
 const analyticsRoutes = require('./routes/analytics');
 const dashboardRoutes = require('./routes/dashboard');
 const debugRoutes = require('./routes/debug');
+const voiceRoutes = require('./routes/voice');
+const bulkRoutes = require('./routes/bulk');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -40,6 +42,8 @@ app.use('/api/leads', leadRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/debug', debugRoutes);
+app.use('/api/voice', voiceRoutes);
+app.use('/api/bulk', bulkRoutes);
 
 // Health check endpoint
 app.get('/api/health', async (req, res) => {

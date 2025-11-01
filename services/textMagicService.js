@@ -1,74 +1,57 @@
-const TextMagic = require('textmagic-rest-nodejs');
+// Using Twilio for both voice and SMS now
+const twilio = require('twilio');
 
 class TextMagicService {
   constructor() {
-    this.client = new TextMagic.TextMagicApi({
-      username: process.env.TEXTMAGIC_USERNAME,
-      token: process.env.TEXTMAGIC_API_KEY
-    });
+    // Use Twilio for SMS instead of TextMagic
+    this.client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    this.phoneNumber = process.env.TWILIO_PHONE_NUMBER;
   }
 
   /**
-   * Initiate a voice call to a phone number
-   * @param {string} phoneNumber - Phone number to call
-   * @param {string} message - Message to speak (will be converted to speech)
-   * @param {Object} options - Additional call options
-   * @returns {Promise<Object>} Call initiation result
-   */
-  async initiateCall(phoneNumber, message, options = {}) {
-    try {
-      // TextMagic primarily handles SMS, but we can use it for call notifications
-      // For actual voice calls, you might need to integrate with Twilio or similar
-      
-      const callData = {
-        phones: phoneNumber,
-        text: `Voice call initiated: ${message}`,
-        ...options
-      };
-
-      // This is a placeholder - TextMagic doesn't directly support voice calls
-      // You would typically use Twilio Voice API for actual calling
-      console.log('Call would be initiated with:', callData);
-      
-      // Simulate call initiation
-      return {
-        success: true,
-        callId: `call_${Date.now()}`,
-        phoneNumber: phoneNumber,
-        status: 'initiated',
-        message: 'Call simulation - integrate with Twilio for real calls'
-      };
-      
-    } catch (error) {
-      console.error('TextMagic Call Error:', error);
-      throw new Error(`Failed to initiate call: ${error.message}`);
-    }
-  }
-
-  /**
-   * Send SMS notification about call
+   * Send SMS message via Twilio
    * @param {string} phoneNumber - Phone number to send SMS to
    * @param {string} message - SMS message content
-   * @returns {Promise<Object>} SMS send result
+   * @returns {Promise<Object>} SMS result
    */
   async sendSMS(phoneNumber, message) {
     try {
-      const result = await this.client.messages.create({
-        phones: phoneNumber,
-        text: message
+      const sms = await this.client.messages.create({
+        body: message,
+        from: this.phoneNumber,
+        to: phoneNumber
       });
 
       return {
         success: true,
-        messageId: result.id,
-        phoneNumber: phoneNumber,
-        status: 'sent',
-        message: message
+        messageId: sms.sid,
+        status: sms.status,
+        message: 'SMS sent successfully'
       };
+      
     } catch (error) {
-      console.error('TextMagic SMS Error:', error);
-      throw new Error(`Failed to send SMS: ${error.message}`);
+      console.error('SMS sending failed:', error);
+      return {
+        success: false,
+        error: error.message
+      };
     }
+  }
+
+  /**
+   * Legacy method - now redirects to Twilio Voice Service
+   * @param {string} phoneNumber - Phone number to call
+   * @param {string} message - Message (not used for voice calls)
+   * @param {Object} options - Call options
+   */
+  async initiateCall(phoneNumber, message, options = {}) {
+    // This method is now handled by TwilioVoiceService
+    // Return a message indicating the change
+    return {
+      success: false,
+      error: 'Voice calls are now handled by TwilioVoiceService. Use /api/calls/initiate with useVoice: true',
+      redirect: 'Use TwilioVoiceService for voice calls'
+    };
   }
 
   /**

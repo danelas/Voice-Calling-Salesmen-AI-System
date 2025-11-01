@@ -6,6 +6,7 @@ const prisma = new PrismaClient();
 const OpenAIService = require('../services/openAIService');
 const ElevenLabsService = require('../services/elevenLabsService');
 const TextMagicService = require('../services/textMagicService');
+const TwilioVoiceService = require('../services/twilioVoiceService');
 
 const openAI = new OpenAIService();
 const elevenLabs = new ElevenLabsService();
@@ -39,6 +40,33 @@ router.post('/initiate', async (req, res) => {
 
     // Generate personalized script
     const script = await openAI.generatePersonalizedScript(lead, callType.toLowerCase());
+
+    // Use Twilio to make actual call
+    const twilioVoice = new TwilioVoiceService();
+    
+    // Ensure phone number has +1 prefix for US numbers
+    let phoneNumber = lead.phone;
+    if (!phoneNumber.startsWith('+')) {
+      phoneNumber = '+1' + phoneNumber;
+    }
+    
+    try {
+      const callResult = await twilioVoice.initiateCall(phoneNumber, call.id, lead);
+      
+      // Update call status
+      await prisma.call.update({
+        where: { id: call.id },
+        data: { 
+          status: 'IN_PROGRESS',
+          twilioCallSid: callResult.twilioCallSid,
+          startedAt: new Date()
+        }
+      });
+    } catch (twilioError) {
+      console.log('Twilio call failed, using simulation:', twilioError.message);
+      // Fallback to simulation if Twilio fails
+      const callResult = await textMagic.initiateCall(lead.phone, script.opening);
+    }
 
     // Generate opening audio
     const openingAudio = await elevenLabs.generateSalesAudio(
@@ -163,13 +191,9 @@ router.post('/:callId/interact', async (req, res) => {
       }
     });
 
-    // Generate audio for AI response
-    const emotion = customerAnalysis.sentiment === 'negative' ? 'empathetic' : 'professional';
-    const audioResponse = await elevenLabs.generateSalesAudio(
-      aiResponse.response,
-      emotion,
-      callId
-    );
+    // Skip audio generation for now - use Twilio's built-in TTS
+    console.log('Skipping audio generation, using Twilio TTS');
+    const audioPath = null;
 
     res.json({
       success: true,
@@ -418,6 +442,81 @@ router.get('/:callId', async (req, res) => {
     res.status(500).json({ 
       error: 'Failed to fetch call',
       message: error.message 
+    });
+  }
+});
+
+/**
+ * POST /api/calls/test
+ * Simple test call endpoint for quick testing
+ */
+router.post('/test', async (req, res) => {
+  try {
+    const { phone, firstName = 'Test', lastName = 'User' } = req.body;
+    
+    if (!phone) {
+      return res.status(400).json({
+        success: false,
+        error: 'Phone number is required for test call'
+      });
+    }
+
+    // Create or find test lead
+    const lead = await prisma.lead.upsert({
+      where: { phone: phone },
+      update: {
+        firstName,
+        lastName,
+        notes: 'Test lead for call testing'
+      },
+      create: {
+        firstName,
+        lastName,
+        phone: phone,
+        notes: 'Test lead for call testing',
+        source: 'test_call',
+        status: 'NEW'
+      }
+    });
+
+    // Create call record
+    const call = await prisma.call.create({
+      data: {
+        leadId: lead.id,
+        status: 'SCHEDULED',
+        scheduledAt: new Date()
+      }
+    });
+
+    // For testing, we'll simulate the call process
+    const testResults = {
+      leadCreated: true,
+      callCreated: true,
+      leadId: lead.id,
+      callId: call.id,
+      phone: phone,
+      webhookUrl: `${req.protocol}://${req.get('host')}/api/voice/twiml/${call.id}`,
+      statusUrl: `${req.protocol}://${req.get('host')}/api/voice/status/${call.id}`
+    };
+
+    res.json({
+      success: true,
+      message: 'Test call setup completed',
+      data: testResults,
+      instructions: {
+        step1: 'Lead and call records created',
+        step2: 'Configure Twilio webhook to use the webhookUrl',
+        step3: 'Make a test call to verify the system',
+        step4: 'Check call status and conversation logs'
+      }
+    });
+
+  } catch (error) {
+    console.error('Test call setup error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to setup test call',
+      message: error.message
     });
   }
 });
