@@ -307,6 +307,18 @@ class DebugLogger {
       timestamp: new Date().toISOString()
     });
   }
+
+  // General system errors (used by error handler middleware)
+  static logSystemError(error, path, context = {}) {
+    logger.error('System Error', {
+      type: 'SYSTEM_ERROR',
+      error: error.message,
+      path: path,
+      stack: error.stack,
+      context: context,
+      timestamp: new Date().toISOString()
+    });
+  }
 }
 
 // Export both the logger and debug logger
