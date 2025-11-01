@@ -8,7 +8,7 @@ import {
   BuildingOfficeIcon,
   CalendarIcon,
   ChatBubbleLeftIcon,
-  ChatBubbleRightIcon,
+  ChatBubbleLeftEllipsisIcon,
   FaceSmileIcon,
   FaceFrownIcon,
   PlayIcon,
@@ -197,7 +197,7 @@ const ConversationDetail = () => {
                               {interaction.speaker === 'AI' ? (
                                 <ChatBubbleLeftIcon className="h-4 w-4 text-blue-600" />
                               ) : (
-                                <ChatBubbleRightIcon className="h-4 w-4 text-green-600" />
+                                <ChatBubbleLeftEllipsisIcon className="h-4 w-4 text-green-600" />
                               )}
                               <span className="text-sm font-medium text-gray-900">
                                 {interaction.speaker === 'AI' ? 'AI Assistant' : 'Customer'}
