@@ -1,13 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const { PrismaClient } = require('@prisma/client');
-const TwilioVoiceService = require('../services/twilioVoiceService');
 const OpenAIService = require('../services/openAIService');
+const TwilioVoiceService = require('../services/twilioVoiceService');
+const ElevenLabsService = require('../services/elevenLabsService');
 const { DebugLogger } = require('../utils/logger');
+const VoiceResponse = require('twilio').twiml.VoiceResponse;
 
 const prisma = new PrismaClient();
 const twilioVoice = new TwilioVoiceService();
 const openAI = new OpenAIService();
+const elevenLabs = new ElevenLabsService();
 
 /**
  * POST /api/voice/twiml/:callId
@@ -99,7 +102,11 @@ router.post('/gather/:callId', async (req, res) => {
       return res.status(404).send('Call not found');
     }
 
-    // Log customer response
+    // Handle speech recognition results
+    let customerMessage = SpeechResult;
+    let speechConfidence = parseFloat(Confidence) || 0;
+    
+    // Log customer response (even if empty for debugging)
     if (SpeechResult) {
       await prisma.interaction.create({
         data: {
@@ -109,17 +116,38 @@ router.post('/gather/:callId', async (req, res) => {
           interactionType: 'RESPONSE',
           sentiment: 'neutral', // Will be analyzed by OpenAI
           timestamp: new Date(),
-          metadata: {
-            confidence: Confidence
-          }
+          confidence: speechConfidence
         }
       });
+    }
+    
+    // Handle low confidence or empty speech
+    if (!SpeechResult || SpeechResult.trim().length === 0 || speechConfidence < 0.5) {
+      const clarificationTwiml = new VoiceResponse();
+      clarificationTwiml.say({
+        voice: 'alice',
+        language: 'en-US'
+      }, "I'm sorry, I didn't catch that clearly. Could you please repeat what you said?");
+      
+      // Gather again with more time
+      const gather = clarificationTwiml.gather({
+        input: 'speech dtmf',
+        timeout: 20,
+        speechTimeout: 'auto',
+        speechModel: 'experimental_conversations',
+        enhanced: true,
+        language: 'en-US',
+        action: `/api/voice/gather/${callId}`,
+        method: 'POST'
+      });
+      
+      return res.type('text/xml').send(clarificationTwiml.toString());
     }
 
     // Build conversation history for AI
     const conversationHistory = call.interactions.map(interaction => ({
       role: interaction.speaker === 'AI' ? 'assistant' : 'user',
-      content: interaction.message
+      content: interaction.content
     }));
 
     // Add current customer response
@@ -389,6 +417,73 @@ router.post('/numbers/purchase', async (req, res) => {
       success: false,
       error: 'Failed to purchase phone number'
     });
+  }
+});
+
+/**
+ * GET /api/voice/audio/:callId/:type
+ * Serve ElevenLabs generated audio for realistic voice
+ */
+router.get('/audio/:callId/:type', async (req, res) => {
+  const { callId, type } = req.params;
+  
+  try {
+    // Get call and lead information
+    const call = await prisma.call.findUnique({
+      where: { id: callId },
+      include: { 
+        lead: true,
+        interactions: {
+          orderBy: { timestamp: 'asc' }
+        }
+      }
+    });
+
+    if (!call) {
+      return res.status(404).send('Call not found');
+    }
+
+    let textToSpeak = '';
+    
+    if (type === 'greeting') {
+      // Generate initial greeting with OpenAI
+      const script = await openAI.generatePersonalizedScript(call.lead, 'cold');
+      textToSpeak = script.opening || `Hello, may I speak with ${call.lead.firstName} ${call.lead.lastName}, please? This is from Levco Real Estate Group, a local brokerage here in Hollywood. We are reaching out to homeowners because we have buyers looking in the area and want to know if you are interested in selling.`;
+    } else if (type === 'goodbye') {
+      textToSpeak = `Thank you for your time, ${call.lead.firstName}. We will be in your neighborhood this week with another homeowner, we can schedule to have one of our top agents meet you at your property as well. Have a great day!`;
+    } else {
+      // Get the latest AI response for this call
+      const latestAiInteraction = call.interactions
+        .filter(i => i.speaker === 'AI')
+        .pop();
+      
+      textToSpeak = latestAiInteraction?.content || 'Hello, how can I help you today?';
+    }
+
+    // Generate realistic audio with ElevenLabs
+    const audioBuffer = await elevenLabs.generateSalesAudio(textToSpeak, call.lead);
+    
+    // Set proper headers for audio streaming
+    res.set({
+      'Content-Type': 'audio/mpeg',
+      'Content-Length': audioBuffer.length,
+      'Cache-Control': 'no-cache'
+    });
+    
+    res.send(audioBuffer);
+    
+  } catch (error) {
+    DebugLogger.logCallError(callId, error, 'audio_generation');
+    
+    // Fallback to simple text-to-speech if ElevenLabs fails
+    res.set('Content-Type', 'text/xml');
+    const fallbackTwiml = new VoiceResponse();
+    fallbackTwiml.say({
+      voice: 'alice',
+      language: 'en-US'
+    }, 'Hello, this is a call from Levco Real Estate Group.');
+    
+    res.send(fallbackTwiml.toString());
   }
 });
 

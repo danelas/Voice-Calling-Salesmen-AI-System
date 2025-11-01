@@ -74,19 +74,22 @@ class TwilioVoiceService {
     const VoiceResponse = twilio.twiml.VoiceResponse;
     const twiml = new VoiceResponse();
 
-    // Greet the customer with AI-generated message
-    twiml.say({
-      voice: 'alice',
-      language: 'en-US'
-    }, initialMessage);
+    // Use ElevenLabs generated audio instead of robotic TTS
+    const audioUrl = `${process.env.BASE_URL}/api/voice/audio/${callId}/greeting`;
+    twiml.play(audioUrl);
 
-    // Gather customer response
+    // Gather customer response with improved speech recognition
     const gather = twiml.gather({
-      input: 'speech',
-      timeout: 10,
+      input: 'speech dtmf',
+      timeout: 15,
       speechTimeout: 'auto',
+      speechModel: 'experimental_conversations',
+      enhanced: true,
+      language: 'en-US',
       action: `/api/voice/gather/${callId}`,
-      method: 'POST'
+      method: 'POST',
+      partialResultCallback: `/api/voice/partial/${callId}`,
+      partialResultCallbackMethod: 'POST'
     });
 
     // If no response, try again
@@ -110,18 +113,14 @@ class TwilioVoiceService {
     const VoiceResponse = twilio.twiml.VoiceResponse;
     const twiml = new VoiceResponse();
 
-    // AI speaks the response
-    twiml.say({
-      voice: 'alice',
-      language: 'en-US'
-    }, aiResponse);
+    // Use ElevenLabs generated audio for AI response
+    const responseAudioUrl = `${process.env.BASE_URL}/api/voice/audio/${callId}/response`;
+    twiml.play(responseAudioUrl);
 
     if (endCall) {
-      // End the call gracefully
-      twiml.say({
-        voice: 'alice',
-        language: 'en-US'
-      }, "Thank you for your time. Have a great day!");
+      // End the call gracefully with ElevenLabs audio
+      const goodbyeAudioUrl = `${process.env.BASE_URL}/api/voice/audio/${callId}/goodbye`;
+      twiml.play(goodbyeAudioUrl);
       
       twiml.hangup();
     } else {
