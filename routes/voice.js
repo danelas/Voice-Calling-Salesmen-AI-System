@@ -46,7 +46,7 @@ router.post('/twiml/:callId', async (req, res) => {
       data: {
         callId: callId,
         speaker: 'AI',
-        message: initialMessage.response,
+        content: initialMessage.response,
         interactionType: 'GREETING',
         sentiment: 'neutral',
         timestamp: new Date()
@@ -105,7 +105,7 @@ router.post('/gather/:callId', async (req, res) => {
         data: {
           callId: callId,
           speaker: 'CUSTOMER',
-          message: SpeechResult,
+          content: SpeechResult,
           interactionType: 'RESPONSE',
           sentiment: 'neutral', // Will be analyzed by OpenAI
           timestamp: new Date(),
@@ -148,7 +148,7 @@ router.post('/gather/:callId', async (req, res) => {
       data: {
         callId: callId,
         speaker: 'AI',
-        message: aiResponse.response,
+        content: aiResponse.response,
         interactionType: aiResponse.interactionType || 'RESPONSE',
         sentiment: 'neutral',
         timestamp: new Date()
@@ -260,7 +260,7 @@ router.post('/status/:callId', async (req, res) => {
           data: {
             callId: callId,
             speaker: 'AI',
-            message: voicemailMessage,
+            content: voicemailMessage,
             interactionType: 'VOICEMAIL',
             sentiment: 'neutral',
             timestamp: new Date()
