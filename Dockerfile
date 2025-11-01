@@ -21,8 +21,9 @@ RUN npm ci --verbose
 # Copy Prisma schema
 COPY prisma ./prisma/
 
-# Generate Prisma client
+# Generate Prisma client and push database schema
 RUN npx prisma generate
+RUN npx prisma db push --accept-data-loss
 
 # Copy application code
 COPY . .
