@@ -134,13 +134,13 @@ router.get('/', async (req, res) => {
       // Daily trends (last 30 days)
       prisma.$queryRaw`
         SELECT 
-          DATE(created_at) as date,
+          DATE("createdAt") as date,
           COUNT(*) as total_calls,
           COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END) as completed_calls,
           COUNT(CASE WHEN outcome IN ('INTERESTED', 'MEETING_SCHEDULED', 'SALE_MADE') THEN 1 END) as successful_calls
         FROM calls 
-        WHERE created_at >= ${startDate}
-        GROUP BY DATE(created_at)
+        WHERE "createdAt" >= ${startDate}
+        GROUP BY DATE("createdAt")
         ORDER BY date DESC
         LIMIT 30
       `,

@@ -95,7 +95,7 @@ router.post('/', async (req, res) => {
         firstName,
         middleInitial,
         lastName,
-        exactAge,
+        exactAge: exactAge ? parseInt(exactAge) : null,
         email,
         
         // Contact Information
@@ -112,24 +112,24 @@ router.post('/', async (req, res) => {
         longitude,
         
         // Property Information
-        homeValue,
-        yearBuilt,
-        purchasePrice,
+        homeValue: homeValue ? parseFloat(homeValue) : null,
+        yearBuilt: yearBuilt ? parseInt(yearBuilt) : null,
+        purchasePrice: purchasePrice ? parseFloat(purchasePrice) : null,
         homePurchaseDate: homePurchaseDate ? new Date(homePurchaseDate) : null,
-        yearsInResidence,
+        yearsInResidence: yearsInResidence ? parseInt(yearsInResidence) : null,
         propertyType,
         
         // Financial Information
         mostRecentMortgageDate: mostRecentMortgageDate ? new Date(mostRecentMortgageDate) : null,
-        mostRecentMortgageAmount,
-        loanToValue,
-        estimatedIncome,
+        mostRecentMortgageAmount: mostRecentMortgageAmount ? parseFloat(mostRecentMortgageAmount) : null,
+        loanToValue: loanToValue ? parseFloat(loanToValue) : null,
+        estimatedIncome: estimatedIncome ? parseFloat(estimatedIncome) : null,
         estimatedIncomeCode,
         
         // Personal Demographics
         maritalStatus,
-        presenceOfChildren,
-        numberOfChildren,
+        presenceOfChildren: presenceOfChildren ? Boolean(presenceOfChildren) : null,
+        numberOfChildren: numberOfChildren ? parseInt(numberOfChildren) : null,
         education,
         occupation,
         language,

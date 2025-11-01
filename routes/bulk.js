@@ -225,7 +225,7 @@ router.post('/upload-leads', async (req, res) => {
  * POST /api/bulk/upload-file
  * Upload CSV or JSON file with comprehensive lead data
  */
-router.post('/upload-file', upload.single('leadFile'), async (req, res) => {
+router.post('/upload-file', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
