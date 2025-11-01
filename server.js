@@ -82,16 +82,19 @@ if (process.env.NODE_ENV === 'production') {
   
   // Check if build directory exists
   if (fs.existsSync(buildPath)) {
+    console.log('✅ React build directory found, serving static files from:', buildPath);
     app.use(express.static(buildPath));
     
-    app.get('*', (req, res) => {
-      // Skip API routes
+    app.get('*', (req, res, next) => {
+      // Skip API routes - let them be handled by API routers or 404 handler
       if (req.path.startsWith('/api/')) {
-        return;
+        return next();
       }
+      console.log('📄 Serving React app for route:', req.path);
       res.sendFile(path.join(buildPath, 'index.html'));
     });
   } else {
+    console.log('❌ React build directory not found at:', buildPath);
     // Temporary fallback for missing build
     app.get('/', (req, res) => {
       res.json({
