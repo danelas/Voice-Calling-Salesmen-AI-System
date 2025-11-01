@@ -109,13 +109,10 @@ model Call {
 model Campaign {
   id              String      @id @default(cuid())
   name            String
-  status          String      @default("SCHEDULED") // SCHEDULED, RUNNING, PAUSED, COMPLETED, CANCELLED
+  status          String      @default("RUNNING") // RUNNING, PAUSED, COMPLETED
   totalLeads      Int         @default(0)
   completedCalls  Int         @default(0)
   successfulCalls Int         @default(0)
-  script          String?     // Custom script for this campaign
-  delayBetweenCalls Int       @default(30) // seconds
-  maxConcurrentCalls Int      @default(3)
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
   startedAt       DateTime?
@@ -232,4 +229,21 @@ enum InteractionType {
 enum Speaker {
   AI
   CUSTOMER
+}
+
+model Notification {
+  id            String   @id @default(cuid())
+  type          String   // LEAD_INTEREST, APPOINTMENT_SET, HIGH_PRIORITY, etc.
+  title         String
+  message       String
+  priority      String   @default("MEDIUM") // HIGH, MEDIUM, LOW
+  leadName      String?
+  leadPhone     String?
+  outcome       String?
+  interestLevel Int?
+  read          Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@map("notifications")
 }

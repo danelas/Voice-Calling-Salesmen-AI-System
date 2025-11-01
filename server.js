@@ -12,6 +12,22 @@ const { errorHandler, notFoundHandler, timeoutHandler } = require('./middleware/
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
+// Run database migrations on startup
+async function runMigrations() {
+  try {
+    console.log('🔄 Running database migrations...');
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    await execAsync('npx prisma db push --accept-data-loss');
+    console.log('✅ Database migrations completed');
+  } catch (error) {
+    console.error('❌ Database migration failed:', error.message);
+    // Don't exit the process, let the app try to run anyway
+  }
+}
+
 // Import routes
 const callRoutes = require('./routes/calls');
 const leadRoutes = require('./routes/leads');
@@ -151,11 +167,14 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   logger.info(`🚀 Voice Sales AI server running on port ${PORT}`);
   logger.info(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   logger.info(`🔗 Health check: http://localhost:${PORT}/api/health`);
   logger.info(`🐛 Debug endpoint: http://localhost:${PORT}/api/debug/health`);
+  
+  // Run database migrations after server starts
+  await runMigrations();
   
   DebugLogger.logSuccess('Server startup', {
     port: PORT,

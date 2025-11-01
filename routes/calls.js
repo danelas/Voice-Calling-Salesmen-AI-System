@@ -5,11 +5,13 @@ const prisma = new PrismaClient();
 
 const OpenAIService = require('../services/openAIService');
 const ElevenLabsService = require('../services/elevenLabsService');
+const NotificationService = require('../services/notificationService');
 const TextMagicService = require('../services/textMagicService');
 const TwilioVoiceService = require('../services/twilioVoiceService');
 
 const openAI = new OpenAIService();
 const elevenLabs = new ElevenLabsService();
+const notificationService = new NotificationService();
 const textMagic = new TextMagicService();
 
 /**
@@ -540,6 +542,133 @@ router.post('/schedule', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to schedule call',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/calls/:id/complete
+ * Mark call as complete and analyze outcome
+ */
+router.post('/:id/complete', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { outcome, duration, conversationHistory } = req.body;
+
+    // Get call and lead information
+    const call = await prisma.call.findUnique({
+      where: { id },
+      include: { lead: true, interactions: true }
+    });
+
+    if (!call) {
+      return res.status(404).json({
+        success: false,
+        error: 'Call not found'
+      });
+    }
+
+    // Build conversation history from interactions if not provided
+    let fullConversation = conversationHistory;
+    if (!fullConversation && call.interactions.length > 0) {
+      fullConversation = call.interactions.map(interaction => ({
+        role: interaction.speaker === 'AI' ? 'assistant' : 'user',
+        content: interaction.content
+      }));
+    }
+
+    // Analyze call outcome with OpenAI
+    let callOutcome = null;
+    if (fullConversation && fullConversation.length > 0) {
+      try {
+        callOutcome = await openAI.analyzeCallOutcome(fullConversation, call.lead);
+      } catch (analysisError) {
+        console.error('Call outcome analysis failed:', analysisError);
+        // Continue with manual outcome if provided
+      }
+    }
+
+    // Update call record
+    const updatedCall = await prisma.call.update({
+      where: { id },
+      data: {
+        status: 'COMPLETED',
+        outcome: callOutcome?.outcome || outcome || 'COMPLETED',
+        endedAt: new Date(),
+        duration: duration || null,
+        // Store analysis results
+        notes: callOutcome ? JSON.stringify({
+          summary: callOutcome.summary,
+          interestLevel: callOutcome.interestLevel,
+          nextSteps: callOutcome.nextSteps,
+          keyObjections: callOutcome.keyObjections,
+          followUpTiming: callOutcome.followUpTiming,
+          appointmentDetails: callOutcome.appointmentDetails
+        }) : null
+      }
+    });
+
+    // Update lead status based on outcome
+    if (callOutcome) {
+      let newLeadStatus = call.lead.status;
+      
+      switch (callOutcome.outcome) {
+        case 'APPOINTMENT_SET':
+          newLeadStatus = 'QUALIFIED';
+          break;
+        case 'INTERESTED':
+          newLeadStatus = 'CONTACTED';
+          break;
+        case 'CALLBACK_REQUESTED':
+          newLeadStatus = 'CONTACTED';
+          break;
+        case 'NOT_INTERESTED':
+          newLeadStatus = 'CLOSED_LOST';
+          break;
+      }
+
+      if (newLeadStatus !== call.lead.status) {
+        await prisma.lead.update({
+          where: { id: call.leadId },
+          data: { status: newLeadStatus }
+        });
+      }
+    }
+
+    // Send notifications if lead is interested
+    if (callOutcome && (
+      callOutcome.notificationRequired || 
+      callOutcome.interestLevel >= 7 ||
+      callOutcome.outcome === 'APPOINTMENT_SET' ||
+      callOutcome.outcome === 'INTERESTED'
+    )) {
+      try {
+        await notificationService.sendInterestNotification(callOutcome, {
+          id: call.id,
+          duration: duration,
+          leadName: `${call.lead.firstName} ${call.lead.lastName}`,
+          leadPhone: call.lead.phone
+        });
+      } catch (notificationError) {
+        console.error('Failed to send notification:', notificationError);
+        // Don't fail the request if notification fails
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Call completed and analyzed',
+      call: updatedCall,
+      analysis: callOutcome,
+      notificationSent: callOutcome?.notificationRequired || false
+    });
+
+  } catch (error) {
+    console.error('Call completion error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to complete call analysis',
       message: error.message
     });
   }

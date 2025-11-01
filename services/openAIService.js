@@ -6,18 +6,35 @@ class OpenAIService {
       apiKey: process.env.OPENAI_API_KEY,
     });
     
-    this.salesPersona = `You are an expert AI sales representative. You are professional, persuasive, and empathetic. 
-    Your goal is to understand the customer's needs and present solutions that genuinely help them.
-    
-    Key traits:
+    this.salesPersona = `You are an expert AI sales representative calling on behalf of Levco Real Estate Group, a local brokerage in Hollywood. You are professional, persuasive, and empathetic.
+
+    YOUR INTRODUCTION AND PURPOSE:
+    "We are realtors from Levco Real Estate Group, a local brokerage here in Hollywood. We are reaching out to homeowners because we have buyers looking in the area and want to know if they are interested in selling. We then will set up appointments with them with the listing agent so we can get the property sold."
+
+    CONVERSATION APPROACH:
+    - Start with the Levco Real Estate Group introduction naturally
+    - Explain you have buyers actively looking in their specific area
+    - Focus on the opportunity to sell their property quickly
+    - Offer to set up appointments with listing agents
     - Listen actively and ask clarifying questions
-    - Handle objections with empathy and facts
-    - Build rapport naturally
-    - Focus on value, not just features
-    - Know when to close and when to nurture
+    - Handle objections with empathy and facts about the current market
+    - Build rapport naturally by referencing their specific property details
+    - Focus on the value of having qualified buyers ready
+    - Know when to close for the appointment and when to nurture
     - Always maintain a professional, friendly tone
+
+    CLOSING APPROACH FOR APPOINTMENTS:
+    Use this natural closing technique: "We will be in your neighborhood this week with another homeowner, we can schedule to have one of our top agents meet you at your property as well."
     
-    Remember: You're having a phone conversation, so keep responses conversational and natural.`;
+    Then offer specific time options:
+    - "Does morning or evening work best for you?"
+    - "How about Monday at 5pm?"
+    - "Would Tuesday morning around 10am work better?"
+    - "What day this week would be most convenient?"
+    
+    This creates urgency (we're already in the neighborhood) and makes it easy for them to say yes to a specific time.
+    
+    Remember: You're having a phone conversation, so keep responses conversational and natural. Always work the Levco Real Estate Group introduction into your opening or early in the conversation.`;
   }
 
   /**
@@ -69,6 +86,88 @@ class OpenAIService {
     } catch (error) {
       console.error('OpenAI Sales Response Error:', error);
       throw new Error(`Failed to generate sales response: ${error.message}`);
+    }
+  }
+
+  /**
+   * Analyze complete conversation for final outcome and next steps
+   * @param {Array} fullConversation - Complete conversation history
+   * @param {Object} leadInfo - Lead information
+   * @returns {Promise<Object>} Call outcome analysis
+   */
+  async analyzeCallOutcome(fullConversation, leadInfo) {
+    try {
+      const leadProfile = this.buildLeadProfile(leadInfo);
+      
+      const outcomePrompt = `Analyze this complete sales conversation and determine the outcome:
+
+      ${leadProfile}
+
+      CONVERSATION:
+      ${fullConversation.map(msg => `${msg.role}: ${msg.content}`).join('\n')}
+
+      Analyze and provide:
+      1. Overall outcome (INTERESTED, NOT_INTERESTED, APPOINTMENT_SET, CALLBACK_REQUESTED, OBJECTION_UNRESOLVED, HUNG_UP)
+      2. Interest level (1-10 scale)
+      3. Specific next steps needed
+      4. Key objections raised
+      5. Best follow-up timing
+      6. Appointment details if scheduled
+      7. Priority level for follow-up (HIGH, MEDIUM, LOW)
+
+      Format as JSON:
+      {
+        "outcome": "INTERESTED|NOT_INTERESTED|APPOINTMENT_SET|CALLBACK_REQUESTED|OBJECTION_UNRESOLVED|HUNG_UP",
+        "interestLevel": 1-10,
+        "appointmentScheduled": true/false,
+        "appointmentDetails": {
+          "date": "if scheduled",
+          "time": "if scheduled",
+          "notes": "any specific requirements"
+        },
+        "nextSteps": ["specific action 1", "specific action 2"],
+        "keyObjections": ["objection 1", "objection 2"],
+        "followUpTiming": "IMMEDIATE|24_HOURS|1_WEEK|1_MONTH|NO_FOLLOWUP",
+        "priority": "HIGH|MEDIUM|LOW",
+        "summary": "brief summary of conversation outcome",
+        "notificationRequired": true/false,
+        "notificationMessage": "message for immediate notification if interested"
+      }`;
+
+      const completion = await this.client.chat.completions.create({
+        model: 'gpt-4',
+        messages: [
+          { role: 'system', content: 'You are an expert sales conversation analyzer. Provide accurate, actionable analysis.' },
+          { role: 'user', content: outcomePrompt }
+        ],
+        max_tokens: 600,
+        temperature: 0.3
+      });
+
+      const analysisText = completion.choices[0].message.content;
+      
+      try {
+        const analysis = JSON.parse(analysisText);
+        
+        // Add timestamp and lead info
+        analysis.analyzedAt = new Date().toISOString();
+        analysis.leadId = leadInfo.id;
+        analysis.leadName = `${leadInfo.firstName} ${leadInfo.lastName}`;
+        analysis.leadPhone = leadInfo.phone;
+        
+        return analysis;
+      } catch (parseError) {
+        console.error('Failed to parse outcome analysis:', parseError);
+        return {
+          outcome: 'ANALYSIS_FAILED',
+          interestLevel: 5,
+          summary: analysisText,
+          notificationRequired: false
+        };
+      }
+    } catch (error) {
+      console.error('Call outcome analysis error:', error);
+      throw new Error(`Failed to analyze call outcome: ${error.message}`);
     }
   }
 
@@ -279,20 +378,23 @@ class OpenAIService {
       
       ${leadProfile}
       
+      REQUIRED: Include the Levco Real Estate Group introduction naturally in the opening:
+      "We are realtors from Levco Real Estate Group, a local brokerage here in Hollywood. We are reaching out to homeowners because we have buyers looking in the area and want to know if they are interested in selling."
+      
       Create a natural, conversational script that incorporates their specific details:
-      1. Personalized opening that references their location or property details
-      2. Value proposition relevant to their situation (homeowner, mortgage balance, years owned)
-      3. 2-3 discovery questions that build on what we know
-      4. Soft close or next step
+      1. Personalized opening that includes the Levco Real Estate Group introduction and references their location or property details
+      2. Value proposition about having qualified buyers looking in their specific area
+      3. 2-3 discovery questions about their selling timeline and property situation
+      4. Closing approach using: "We will be in your neighborhood this week with another homeowner, we can schedule to have one of our top agents meet you at your property as well. Does morning or evening work best? How about Monday at 5pm?"
       
       If they speak a language other than English, note this in the opening.
       
       Format as JSON:
       {
-        "opening": "personalized opening line",
-        "valueProposition": "relevant value prop based on their property/financial situation",
+        "opening": "personalized opening with Levco Real Estate Group introduction",
+        "valueProposition": "value prop about having buyers looking in their area",
         "discoveryQuestions": ["question1", "question2", "question3"],
-        "close": "soft close or next step",
+        "close": "neighborhood urgency close with specific time options",
         "languageNotes": "any language considerations"
       }`;
 
