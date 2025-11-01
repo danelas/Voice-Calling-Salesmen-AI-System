@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
   ChartBarIcon,
-  TrendingUpIcon,
-  TrendingDownIcon,
+  ArrowTrendingUpIcon,
+  ArrowTrendingDownIcon,
   ClockIcon,
   PhoneIcon
 } from '@heroicons/react/24/outline';
@@ -97,7 +97,7 @@ const Analytics = () => {
           </div>
           <div className="mt-4">
             <div className="flex items-center text-sm">
-              <TrendingUpIcon className="h-4 w-4 text-green-500 mr-1" />
+              <ArrowTrendingUpIcon className="h-4 w-4 text-green-500 mr-1" />
               <span className="text-green-600">+5.2%</span>
               <span className="text-gray-500 ml-1">from last period</span>
             </div>
@@ -118,7 +118,7 @@ const Analytics = () => {
           </div>
           <div className="mt-4">
             <div className="flex items-center text-sm">
-              <TrendingUpIcon className="h-4 w-4 text-green-500 mr-1" />
+              <ArrowTrendingUpIcon className="h-4 w-4 text-green-500 mr-1" />
               <span className="text-green-600">+12.3%</span>
               <span className="text-gray-500 ml-1">from last period</span>
             </div>
@@ -141,7 +141,7 @@ const Analytics = () => {
           </div>
           <div className="mt-4">
             <div className="flex items-center text-sm">
-              <TrendingDownIcon className="h-4 w-4 text-red-500 mr-1" />
+              <ArrowTrendingDownIcon className="h-4 w-4 text-red-500 mr-1" />
               <span className="text-red-600">-2.1%</span>
               <span className="text-gray-500 ml-1">from last period</span>
             </div>
@@ -151,7 +151,7 @@ const Analytics = () => {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center">
             <div className="flex-shrink-0">
-              <TrendingUpIcon className="h-8 w-8 text-purple-600" />
+              <ArrowTrendingUpIcon className="h-8 w-8 text-purple-600" />
             </div>
             <div className="ml-5 w-0 flex-1">
               <dl>
@@ -164,7 +164,7 @@ const Analytics = () => {
           </div>
           <div className="mt-4">
             <div className="flex items-center text-sm">
-              <TrendingUpIcon className="h-4 w-4 text-green-500 mr-1" />
+              <ArrowTrendingUpIcon className="h-4 w-4 text-green-500 mr-1" />
               <span className="text-green-600">+8.7%</span>
               <span className="text-gray-500 ml-1">from last period</span>
             </div>
@@ -253,7 +253,7 @@ const Analytics = () => {
           <div className="space-y-4">
             <div className="p-4 bg-green-50 rounded-lg border border-green-200">
               <div className="flex items-center">
-                <TrendingUpIcon className="h-5 w-5 text-green-600 mr-2" />
+                <ArrowTrendingUpIcon className="h-5 w-5 text-green-600 mr-2" />
                 <span className="text-sm font-medium text-green-800">Best Performance</span>
               </div>
               <p className="text-sm text-green-700 mt-1">
@@ -283,7 +283,7 @@ const Analytics = () => {
 
             <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
               <div className="flex items-center">
-                <TrendingUpIcon className="h-5 w-5 text-purple-600 mr-2" />
+                <ArrowTrendingUpIcon className="h-5 w-5 text-purple-600 mr-2" />
                 <span className="text-sm font-medium text-purple-800">Script Performance</span>
               </div>
               <p className="text-sm text-purple-700 mt-1">

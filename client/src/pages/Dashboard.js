@@ -5,7 +5,7 @@ import {
   UserGroupIcon,
   ChartBarIcon,
   ClockIcon,
-  TrendingUpIcon,
+  ArrowTrendingUpIcon,
   ChatBubbleLeftRightIcon
 } from '@heroicons/react/24/outline';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
@@ -85,7 +85,7 @@ const Dashboard = () => {
           </div>
           <div className="mt-4">
             <div className="flex items-center text-sm">
-              <TrendingUpIcon className="h-4 w-4 text-green-500 mr-1" />
+              <ArrowTrendingUpIcon className="h-4 w-4 text-green-500 mr-1" />
               <span className="text-green-600">+12%</span>
               <span className="text-gray-500 ml-1">from last period</span>
             </div>
@@ -106,7 +106,7 @@ const Dashboard = () => {
           </div>
           <div className="mt-4">
             <div className="flex items-center text-sm">
-              <TrendingUpIcon className="h-4 w-4 text-green-500 mr-1" />
+              <ArrowTrendingUpIcon className="h-4 w-4 text-green-500 mr-1" />
               <span className="text-green-600">+8%</span>
               <span className="text-gray-500 ml-1">from last period</span>
             </div>
@@ -129,7 +129,7 @@ const Dashboard = () => {
           </div>
           <div className="mt-4">
             <div className="flex items-center text-sm">
-              <TrendingUpIcon className="h-4 w-4 text-green-500 mr-1" />
+              <ArrowTrendingUpIcon className="h-4 w-4 text-green-500 mr-1" />
               <span className="text-green-600">+5%</span>
               <span className="text-gray-500 ml-1">from last period</span>
             </div>
@@ -152,7 +152,7 @@ const Dashboard = () => {
           </div>
           <div className="mt-4">
             <div className="flex items-center text-sm">
-              <TrendingUpIcon className="h-4 w-4 text-green-500 mr-1" />
+              <ArrowTrendingUpIcon className="h-4 w-4 text-green-500 mr-1" />
               <span className="text-green-600">+15s</span>
               <span className="text-gray-500 ml-1">from last period</span>
             </div>
