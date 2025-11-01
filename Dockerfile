@@ -27,6 +27,9 @@ RUN npx prisma generate
 # Copy application code
 COPY . .
 
+# Install client dependencies and build React app
+RUN cd client && npm ci && npm run build
+
 # Create necessary directories with proper permissions
 RUN mkdir -p audio temp logs && \
     chmod 755 audio temp logs

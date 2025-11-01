@@ -77,11 +77,42 @@ app.get('/api/health', async (req, res) => {
 
 // Serve static files from React build (for production)
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'client/build')));
+  const buildPath = path.join(__dirname, 'client/build');
+  const fs = require('fs');
   
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'client/build', 'index.html'));
-  });
+  // Check if build directory exists
+  if (fs.existsSync(buildPath)) {
+    app.use(express.static(buildPath));
+    
+    app.get('*', (req, res) => {
+      // Skip API routes
+      if (req.path.startsWith('/api/')) {
+        return;
+      }
+      res.sendFile(path.join(buildPath, 'index.html'));
+    });
+  } else {
+    // Temporary fallback for missing build
+    app.get('/', (req, res) => {
+      res.json({
+        message: 'Voice Sales AI System',
+        status: 'Running',
+        dashboard: 'Frontend build in progress',
+        api: {
+          health: '/api/health',
+          leads: '/api/leads',
+          calls: '/api/calls',
+          analytics: '/api/analytics',
+          debug: '/api/debug/health'
+        },
+        timestamp: new Date().toISOString()
+      });
+    });
+    
+    app.get('/conversations', (req, res) => {
+      res.redirect('/api/calls');
+    });
+  }
 }
 
 // Error handling middleware
