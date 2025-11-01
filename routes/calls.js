@@ -447,6 +447,105 @@ router.get('/:callId', async (req, res) => {
 });
 
 /**
+ * POST /api/calls/schedule
+ * Schedule a call for a specific time
+ */
+router.post('/schedule', async (req, res) => {
+  try {
+    const { 
+      leadId, 
+      scheduledAt, 
+      callType = 'COLD_CALL',
+      priority = 'NORMAL',
+      notes 
+    } = req.body;
+    
+    if (!leadId || !scheduledAt) {
+      return res.status(400).json({
+        success: false,
+        error: 'Lead ID and scheduled time are required'
+      });
+    }
+
+    // Validate lead exists
+    const lead = await prisma.lead.findUnique({
+      where: { id: leadId }
+    });
+
+    if (!lead) {
+      return res.status(404).json({
+        success: false,
+        error: 'Lead not found'
+      });
+    }
+
+    // Parse and validate scheduled time
+    const scheduleTime = new Date(scheduledAt);
+    const now = new Date();
+    
+    if (scheduleTime <= now) {
+      return res.status(400).json({
+        success: false,
+        error: 'Scheduled time must be in the future'
+      });
+    }
+
+    // Check business hours (9 AM - 6 PM local time)
+    const hour = scheduleTime.getHours();
+    if (hour < 9 || hour > 18) {
+      return res.status(400).json({
+        success: false,
+        error: 'Calls should be scheduled during business hours (9 AM - 6 PM)',
+        suggestion: 'Consider scheduling between 10 AM - 4 PM for best results'
+      });
+    }
+
+    // Create scheduled call
+    const call = await prisma.call.create({
+      data: {
+        leadId: leadId,
+        status: 'SCHEDULED',
+        scheduledAt: scheduleTime,
+        callType: callType,
+        priority: priority,
+        notes: notes
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Call scheduled successfully',
+      call: {
+        id: call.id,
+        leadId: call.leadId,
+        scheduledAt: call.scheduledAt,
+        callType: call.callType,
+        priority: call.priority,
+        status: call.status
+      },
+      lead: {
+        name: `${lead.firstName} ${lead.lastName}`,
+        phone: lead.phone,
+        company: lead.company
+      },
+      timing: {
+        scheduledFor: scheduleTime.toISOString(),
+        timeUntilCall: Math.round((scheduleTime - now) / 1000 / 60), // minutes
+        recommendedWindow: 'Calls between 10-11 AM show 23% higher success rates'
+      }
+    });
+
+  } catch (error) {
+    console.error('Call scheduling error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to schedule call',
+      message: error.message
+    });
+  }
+});
+
+/**
  * POST /api/calls/test
  * Simple test call endpoint for quick testing
  */
