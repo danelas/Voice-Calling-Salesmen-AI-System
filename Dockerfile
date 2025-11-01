@@ -35,11 +35,11 @@ RUN mkdir -p audio temp logs && \
     chmod 755 audio temp logs
 
 # Expose port
-EXPOSE 3001
+EXPOSE 10000
 
 # Simple health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-  CMD curl -f http://localhost:3001/api/health || exit 1
+  CMD curl -f http://localhost:10000/api/health || exit 1
 
 # Start the application
 CMD ["npm", "start"]

@@ -22,7 +22,7 @@ const voiceRoutes = require('./routes/voice');
 const bulkRoutes = require('./routes/bulk');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 10000;
 
 // Middleware
 app.use(helmet());
@@ -100,13 +100,19 @@ if (process.env.NODE_ENV === 'production') {
       res.json({
         message: 'Voice Sales AI System',
         status: 'Running',
-        dashboard: 'Frontend build in progress',
+        dashboard: 'React build not found - using API mode',
         api: {
           health: '/api/health',
           leads: '/api/leads',
           calls: '/api/calls',
           analytics: '/api/analytics',
-          debug: '/api/debug/health'
+          debug: '/api/debug/health',
+          testCall: '/api/calls/test'
+        },
+        instructions: {
+          testCall: 'POST to /api/calls/test with {"phone": "YOUR_NUMBER"}',
+          addLead: 'POST to /api/leads with lead data',
+          viewCalls: 'GET /api/calls to see all calls'
         },
         timestamp: new Date().toISOString()
       });
@@ -114,6 +120,10 @@ if (process.env.NODE_ENV === 'production') {
     
     app.get('/conversations', (req, res) => {
       res.redirect('/api/calls');
+    });
+    
+    app.get('/dashboard', (req, res) => {
+      res.redirect('/api/dashboard');
     });
   }
 }
