@@ -33,6 +33,7 @@ const Leads = () => {
     delayBetweenCalls: 60,
     maxConcurrentCalls: 2
   });
+  const [calling, setCalling] = useState({});
 
   useEffect(() => {
     fetchLeads();
@@ -46,6 +47,25 @@ const Leads = () => {
       console.error('Error fetching leads:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCallLead = async (lead) => {
+    setCalling(prev => ({ ...prev, [lead.id]: true }));
+    
+    try {
+      const response = await axios.post('/api/calls/initiate', {
+        leadId: lead.id,
+        callType: 'COLD_CALL'
+      });
+      
+      alert(`Call initiated successfully! Call ID: ${response.data.call.id}\n\nNext steps:\n1. Configure Twilio webhook\n2. Make the actual call\n\nCheck the response for webhook URL.`);
+      
+    } catch (error) {
+      console.error('Error initiating call:', error);
+      alert('Error initiating call. Please try again.');
+    } finally {
+      setCalling(prev => ({ ...prev, [lead.id]: false }));
     }
   };
 
@@ -309,8 +329,12 @@ const Leads = () => {
                         <button className="text-blue-600 hover:text-blue-900">
                           Edit
                         </button>
-                        <button className="text-green-600 hover:text-green-900">
-                          Call
+                        <button 
+                          onClick={() => handleCallLead(lead)}
+                          disabled={calling[lead.id]}
+                          className="text-green-600 hover:text-green-900 disabled:opacity-50"
+                        >
+                          {calling[lead.id] ? 'Calling...' : 'Call'}
                         </button>
                         <Link
                           to={`/conversations?leadId=${lead.id}`}
