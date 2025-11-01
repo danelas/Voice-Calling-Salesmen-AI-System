@@ -75,57 +75,61 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// Serve static files from React build (for production)
-if (process.env.NODE_ENV === 'production') {
-  const buildPath = path.join(__dirname, 'client/build');
-  const fs = require('fs');
+// Serve static files from React build
+const buildPath = path.join(__dirname, 'client/build');
+const fs = require('fs');
+
+console.log('🔍 Checking for React build at:', buildPath);
+console.log('🌍 NODE_ENV:', process.env.NODE_ENV);
+
+// Check if build directory exists
+if (fs.existsSync(buildPath)) {
+  console.log('✅ React build directory found, serving static files from:', buildPath);
+  app.use(express.static(buildPath));
   
-  // Check if build directory exists
-  if (fs.existsSync(buildPath)) {
-    console.log('✅ React build directory found, serving static files from:', buildPath);
-    app.use(express.static(buildPath));
-    
-    app.get('*', (req, res, next) => {
-      // Skip API routes - let them be handled by API routers or 404 handler
-      if (req.path.startsWith('/api/')) {
-        return next();
-      }
-      console.log('📄 Serving React app for route:', req.path);
-      res.sendFile(path.join(buildPath, 'index.html'));
+  app.get('*', (req, res, next) => {
+    // Skip API routes - let them be handled by API routers or 404 handler
+    if (req.path.startsWith('/api/')) {
+      return next();
+    }
+    console.log('📄 Serving React app for route:', req.path);
+    res.sendFile(path.join(buildPath, 'index.html'));
+  });
+} else {
+  console.log('❌ React build directory not found at:', buildPath);
+  // Temporary fallback for missing build
+  app.get('/', (req, res) => {
+    console.log('🏠 Serving fallback home page');
+    res.json({
+      message: 'Voice Sales AI System',
+      status: 'Running',
+      dashboard: 'React build not found - using API mode',
+      environment: process.env.NODE_ENV || 'not set',
+      buildPath: buildPath,
+      api: {
+        health: '/api/health',
+        leads: '/api/leads',
+        calls: '/api/calls',
+        analytics: '/api/analytics',
+        debug: '/api/debug/health',
+        testCall: '/api/calls/test'
+      },
+      instructions: {
+        testCall: 'POST to /api/calls/test with {"phone": "YOUR_NUMBER"}',
+        addLead: 'POST to /api/leads with lead data',
+        viewCalls: 'GET /api/calls to see all calls'
+      },
+      timestamp: new Date().toISOString()
     });
-  } else {
-    console.log('❌ React build directory not found at:', buildPath);
-    // Temporary fallback for missing build
-    app.get('/', (req, res) => {
-      res.json({
-        message: 'Voice Sales AI System',
-        status: 'Running',
-        dashboard: 'React build not found - using API mode',
-        api: {
-          health: '/api/health',
-          leads: '/api/leads',
-          calls: '/api/calls',
-          analytics: '/api/analytics',
-          debug: '/api/debug/health',
-          testCall: '/api/calls/test'
-        },
-        instructions: {
-          testCall: 'POST to /api/calls/test with {"phone": "YOUR_NUMBER"}',
-          addLead: 'POST to /api/leads with lead data',
-          viewCalls: 'GET /api/calls to see all calls'
-        },
-        timestamp: new Date().toISOString()
-      });
-    });
-    
-    app.get('/conversations', (req, res) => {
-      res.redirect('/api/calls');
-    });
-    
-    app.get('/dashboard', (req, res) => {
-      res.redirect('/api/dashboard');
-    });
-  }
+  });
+  
+  app.get('/conversations', (req, res) => {
+    res.redirect('/api/calls');
+  });
+  
+  app.get('/dashboard', (req, res) => {
+    res.redirect('/api/dashboard');
+  });
 }
 
 // Error handling middleware
