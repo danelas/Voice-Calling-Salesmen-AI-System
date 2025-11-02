@@ -1,5 +1,6 @@
 const WebSocket = require('ws');
 const { DebugLogger } = require('../utils/logger');
+const { muLawBase64ToPCM16, mp3ToMulawChunks, sleep } = require('../utils/audioUtils');
 
 class OpenAIRealtimeService {
   constructor() {
@@ -32,7 +33,11 @@ class OpenAIRealtimeService {
         openaiWs,
         twilioStream,
         leadData,
-        conversationHistory: []
+        conversationHistory: [],
+        streamSid: null,
+        pcmBuffer: Buffer.alloc(0),
+        commitTimer: null,
+        lastAudioAt: 0,
       });
 
       // Configure OpenAI session
@@ -160,8 +165,7 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
     try {
       switch (message.type) {
         case 'response.audio.delta':
-          // OpenAI is generating audio - we'll replace this with ElevenLabs
-          await this.handleAudioResponse(callId, message.delta);
+          // Ignore OpenAI audio (we use ElevenLabs voice)
           break;
 
         case 'conversation.item.input_audio_transcription.completed':
@@ -174,6 +178,19 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
           
           // Log to database
           await this.logInteraction(callId, 'CUSTOMER', customerText);
+
+          // Ask the model to respond (text only; we'll synthesize with ElevenLabs)
+          try {
+            const responseCreate = {
+              type: 'response.create',
+              response: {
+                modalities: ['text']
+              }
+            };
+            connection.openaiWs.send(JSON.stringify(responseCreate));
+          } catch (e) {
+            DebugLogger.logCallError(callId, e, 'response_create');
+          }
           break;
 
         case 'response.text.delta':
@@ -199,21 +216,7 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
    * Handle AI audio response (replace with ElevenLabs)
    */
   async handleAudioResponse(callId, audioDelta) {
-    // Instead of using OpenAI's voice, we'll use ElevenLabs
-    // This is where we'd convert the text to ElevenLabs audio
-    const connection = this.connections.get(callId);
-    if (!connection) return;
-
-    // For now, we'll use the audio delta, but ideally convert text to ElevenLabs
-    if (connection.twilioStream) {
-      connection.twilioStream.send(JSON.stringify({
-        event: 'media',
-        streamSid: connection.twilioStream.streamSid,
-        media: {
-          payload: audioDelta
-        }
-      }));
-    }
+    // No-op: we don't forward OpenAI audio
   }
 
   /**
@@ -248,20 +251,24 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
       const ElevenLabsService = require('./elevenLabsService');
       const elevenLabs = new ElevenLabsService();
       
-      const audioBuffer = await elevenLabs.generateSalesAudio(text, 'professional', callId);
-      
-      // Convert to base64 for Twilio
-      const audioBase64 = audioBuffer.toString('base64');
-      
-      // Send to Twilio stream
-      if (connection.twilioStream) {
-        connection.twilioStream.send(JSON.stringify({
+      const mp3Buffer = await elevenLabs.generateSalesAudio(text, 'professional', callId);
+
+      // Convert ElevenLabs audio (mp3) to 8k mulaw frames
+      const frames = await mp3ToMulawChunks(mp3Buffer, 20);
+
+      // Stream frames to Twilio as base64 payloads
+      for (const frame of frames) {
+        if (!connection.twilioStream) break;
+        const payload = frame.toString('base64');
+        const msg = {
           event: 'media',
-          streamSid: connection.twilioStream.streamSid,
-          media: {
-            payload: audioBase64
-          }
-        }));
+          media: { payload }
+        };
+        if (connection.streamSid) {
+          msg.streamSid = connection.streamSid;
+        }
+        connection.twilioStream.send(JSON.stringify(msg));
+        await sleep(20);
       }
 
       // Log the interaction
@@ -270,6 +277,65 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
     } catch (error) {
       DebugLogger.logCallError(callId, error, 'elevenlabs_conversion');
     }
+  }
+
+  /**
+   * Set Twilio stream SID for routing outbound media
+   */
+  setStreamSid(callId, streamSid) {
+    const connection = this.connections.get(callId);
+    if (connection) {
+      connection.streamSid = streamSid;
+    }
+  }
+
+  /**
+   * Handle a single Twilio media payload (base64 mu-law) and feed to OpenAI
+   */
+  async handleTwilioMedia(callId, muLawBase64) {
+    const connection = this.connections.get(callId);
+    if (!connection || !connection.openaiWs || connection.openaiWs.readyState !== WebSocket.OPEN) return;
+
+    try {
+      const pcm16 = muLawBase64ToPCM16(muLawBase64);
+      connection.pcmBuffer = Buffer.concat([connection.pcmBuffer, pcm16]);
+      connection.lastAudioAt = Date.now();
+
+      // Debounced commit to OpenAI (aggregate ~200ms)
+      if (!connection.commitTimer) {
+        connection.commitTimer = setTimeout(() => {
+          this.flushAudioToOpenAI(callId).catch(err => {
+            DebugLogger.logCallError(callId, err, 'audio_flush');
+          });
+        }, 220);
+      }
+    } catch (e) {
+      DebugLogger.logCallError(callId, e, 'twilio_media_handle');
+    }
+  }
+
+  /**
+   * Flush buffered PCM16 to OpenAI input_audio_buffer
+   */
+  async flushAudioToOpenAI(callId) {
+    const connection = this.connections.get(callId);
+    if (!connection || !connection.openaiWs || connection.openaiWs.readyState !== WebSocket.OPEN) return;
+
+    const pcm = connection.pcmBuffer;
+    connection.pcmBuffer = Buffer.alloc(0);
+    clearTimeout(connection.commitTimer);
+    connection.commitTimer = null;
+
+    if (!pcm || pcm.length === 0) return;
+
+    const audioAppend = {
+      type: 'input_audio_buffer.append',
+      audio: pcm.toString('base64')
+    };
+    connection.openaiWs.send(JSON.stringify(audioAppend));
+
+    const commit = { type: 'input_audio_buffer.commit' };
+    connection.openaiWs.send(JSON.stringify(commit));
   }
 
   /**

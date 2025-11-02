@@ -203,10 +203,20 @@ const server = app.listen(PORT, () => {
   logger.info(`🔗 Health check: http://localhost:${PORT}/api/health`);
   logger.info(`🐛 Debug endpoint: http://localhost:${PORT}/api/debug/health`);
   
-  // WebSocket server temporarily disabled to prevent crashes
-  // Will re-enable after fixing OpenAI Realtime API integration
-  console.log('🎙️ Using simple voice mode (WebSocket disabled temporarily)');
-  logger.info(`🎙️ Simple voice mode active - calls will work without crashes`);
+  // Feature flag: enable realtime WebSocket when FEATURE_REALTIME=on
+  if (process.env.FEATURE_REALTIME === 'on') {
+    try {
+      const { setupWebSocketServer } = require('./routes/realtimeVoice');
+      setupWebSocketServer(server);
+      console.log('🎙️ Realtime WebSocket server ENABLED (FEATURE_REALTIME=on)');
+      logger.info('🎙️ Realtime voice WebSocket enabled');
+    } catch (e) {
+      console.error('❌ Failed to start WebSocket server:', e.message);
+    }
+  } else {
+    console.log('🎙️ Simple voice mode (FEATURE_REALTIME not on)');
+    logger.info('🎙️ Simple voice mode active');
+  }
   
   // Run database migrations after server starts (non-blocking)
   runMigrations().catch(err => {

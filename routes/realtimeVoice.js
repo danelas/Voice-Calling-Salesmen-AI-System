@@ -80,11 +80,24 @@ function setupWebSocketServer(server) {
               // Start OpenAI realtime conversation
               console.log(`🚀 Starting OpenAI realtime conversation for ${callId}`);
               await realtimeService.startRealtimeConversation(callId, call.lead, ws);
+              if (streamSid) {
+                if (typeof realtimeService.setStreamSid === 'function') {
+                  realtimeService.setStreamSid(callId, streamSid);
+                } else {
+                  ws.streamSid = streamSid;
+                }
+              }
               break;
 
             case 'media':
-              // Audio data from customer - handled by OpenAI service
-              // console.log(`🎵 Audio data received for ${callId}`);
+              // Forward audio frame to OpenAI service
+              if (data.media && data.media.payload) {
+                try {
+                  await realtimeService.handleTwilioMedia(callId, data.media.payload);
+                } catch (e) {
+                  console.error(`❌ Failed forwarding media for ${callId}:`, e.message);
+                }
+              }
               break;
 
             case 'stop':

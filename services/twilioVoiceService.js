@@ -28,10 +28,13 @@ class TwilioVoiceService {
         leadName: `${leadData.firstName} ${leadData.lastName}`
       });
 
+      const useRealtime = process.env.FEATURE_REALTIME === 'on';
+      const streamPath = useRealtime ? '/api/realtime-voice/stream' : '/api/simple-voice/stream';
+
       const call = await this.client.calls.create({
         to: toNumber,
         from: this.phoneNumber,
-        url: `${process.env.BASE_URL}/api/simple-voice/stream/${callId}`, // Use simple voice (no WebSocket)
+        url: `${process.env.BASE_URL}${streamPath}/${callId}`,
         method: 'POST',
         record: true, // Record the call for analysis
         recordingStatusCallback: `${process.env.BASE_URL}/api/voice/recording/${callId}`,
