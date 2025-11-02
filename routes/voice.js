@@ -5,232 +5,15 @@ const OpenAIService = require('../services/openAIService');
 const TwilioVoiceService = require('../services/twilioVoiceService');
 const ElevenLabsService = require('../services/elevenLabsService');
 const { DebugLogger } = require('../utils/logger');
-const VoiceResponse = require('twilio').twiml.VoiceResponse;
 
 const prisma = new PrismaClient();
 const twilioVoice = new TwilioVoiceService();
 const openAI = new OpenAIService();
 const elevenLabs = new ElevenLabsService();
 
-/**
- * POST /api/voice/twiml/:callId
- * Generate initial TwiML for call
- */
-router.post('/twiml/:callId', async (req, res) => {
-  const { callId } = req.params;
-  
-  try {
-    // Get call and lead information
-    const call = await prisma.call.findUnique({
-      where: { id: callId },
-      include: { lead: true }
-    });
+// TwiML routes removed - now using OpenAI Realtime API via WebSocket
 
-    if (!call) {
-      return res.status(404).send('Call not found');
-    }
-
-    // Generate initial AI greeting
-    const initialMessage = await openAI.generateSalesResponse(
-      [],
-      call.lead,
-      'initial_greeting'
-    );
-
-    // Generate TwiML
-    const twiml = twilioVoice.generateInitialTwiML(
-      callId,
-      call.lead,
-      initialMessage.response
-    );
-
-    // Log the interaction
-    await prisma.interaction.create({
-      data: {
-        callId: callId,
-        speaker: 'AI',
-        content: initialMessage.response,
-        interactionType: 'GREETING',
-        sentiment: 'neutral',
-        timestamp: new Date()
-      }
-    });
-
-    DebugLogger.logSuccess('TwiML generated for call', {
-      callId,
-      messageLength: initialMessage.response.length
-    });
-
-    res.type('text/xml');
-    res.send(twiml);
-
-  } catch (error) {
-    DebugLogger.logCallError(callId, error, 'twiml_generation');
-    
-    // Fallback TwiML
-    const VoiceResponse = require('twilio').twiml.VoiceResponse;
-    const twiml = new VoiceResponse();
-    twiml.say('Sorry, there was an error. Please try again later.');
-    twiml.hangup();
-    
-    res.type('text/xml');
-    res.send(twiml.toString());
-  }
-});
-
-/**
- * POST /api/voice/gather/:callId
- * Handle customer speech input
- */
-router.post('/gather/:callId', async (req, res) => {
-  const { callId } = req.params;
-  const { SpeechResult, Confidence } = req.body;
-  
-  try {
-    // Get call and conversation history
-    const call = await prisma.call.findUnique({
-      where: { id: callId },
-      include: { 
-        lead: true,
-        interactions: {
-          orderBy: { timestamp: 'asc' }
-        }
-      }
-    });
-
-    if (!call) {
-      return res.status(404).send('Call not found');
-    }
-
-    // Handle speech recognition results
-    let customerMessage = SpeechResult;
-    let speechConfidence = parseFloat(Confidence) || 0;
-    
-    // Log customer response (even if empty for debugging)
-    if (SpeechResult) {
-      await prisma.interaction.create({
-        data: {
-          callId: callId,
-          speaker: 'CUSTOMER',
-          content: SpeechResult,
-          interactionType: 'RESPONSE',
-          sentiment: 'neutral', // Will be analyzed by OpenAI
-          timestamp: new Date(),
-          confidence: speechConfidence
-        }
-      });
-    }
-    
-    // Handle low confidence or empty speech
-    if (!SpeechResult || SpeechResult.trim().length === 0 || speechConfidence < 0.5) {
-      const clarificationTwiml = new VoiceResponse();
-      clarificationTwiml.say({
-        voice: 'alice',
-        language: 'en-US'
-      }, "I'm sorry, I didn't catch that clearly. Could you please repeat what you said?");
-      
-      // Gather again with more time
-      const gather = clarificationTwiml.gather({
-        input: 'speech dtmf',
-        timeout: 20,
-        speechTimeout: 'auto',
-        speechModel: 'experimental_conversations',
-        enhanced: true,
-        language: 'en-US',
-        action: `/api/voice/gather/${callId}`,
-        method: 'POST'
-      });
-      
-      return res.type('text/xml').send(clarificationTwiml.toString());
-    }
-
-    // Build conversation history for AI
-    const conversationHistory = call.interactions.map(interaction => ({
-      role: interaction.speaker === 'AI' ? 'assistant' : 'user',
-      content: interaction.content
-    }));
-
-    // Add current customer response
-    if (SpeechResult) {
-      conversationHistory.push({
-        role: 'user',
-        content: SpeechResult
-      });
-    }
-
-    // Generate AI response
-    const aiResponse = await openAI.generateSalesResponse(
-      conversationHistory,
-      call.lead,
-      'conversation'
-    );
-
-    // Analyze if call should end
-    const shouldEndCall = aiResponse.shouldEndCall || 
-      conversationHistory.length > 20 || // Max 20 exchanges
-      aiResponse.response.toLowerCase().includes('goodbye') ||
-      aiResponse.response.toLowerCase().includes('thank you for your time');
-
-    // Log AI response
-    await prisma.interaction.create({
-      data: {
-        callId: callId,
-        speaker: 'AI',
-        content: aiResponse.response,
-        interactionType: aiResponse.interactionType || 'RESPONSE',
-        sentiment: 'neutral',
-        timestamp: new Date()
-      }
-    });
-
-    // Update call if ending
-    if (shouldEndCall) {
-      await prisma.call.update({
-        where: { id: callId },
-        data: {
-          status: 'COMPLETED',
-          endedAt: new Date(),
-          outcome: aiResponse.outcome || 'COMPLETED'
-        }
-      });
-    }
-
-    // Generate TwiML response
-    const twiml = twilioVoice.generateResponseTwiML(
-      callId,
-      aiResponse.response,
-      shouldEndCall
-    );
-
-    DebugLogger.logSuccess('AI response generated', {
-      callId,
-      customerMessage: SpeechResult?.substring(0, 100),
-      aiResponseLength: aiResponse.response.length,
-      shouldEndCall
-    });
-
-    res.type('text/xml');
-    res.send(twiml);
-
-  } catch (error) {
-    DebugLogger.logCallError(callId, error, 'speech_processing');
-    
-    // Fallback TwiML
-    const VoiceResponse = require('twilio').twiml.VoiceResponse;
-    const twiml = new VoiceResponse();
-    twiml.say('I apologize, I didn\'t catch that. Could you please repeat?');
-    
-    const gather = twiml.gather({
-      input: 'speech',
-      timeout: 10,
-      action: `/api/voice/gather/${callId}`,
-      method: 'POST'
-    });
-    
-    res.type('text/xml');
-    res.send(twiml.toString());
-  }
-});
+// Speech gathering now handled by OpenAI Realtime API via WebSocket
 
 /**
  * POST /api/voice/status/:callId
@@ -281,9 +64,7 @@ router.post('/status/:callId', async (req, res) => {
       if (call) {
         const voicemailMessage = `Hi ${call.lead.firstName}, this is Sarah from our sales team. I was calling to discuss how we can help ${call.lead.company || 'your business'}. Please call us back at your convenience. Thank you!`;
         
-        const twiml = twilioVoice.generateVoicemailTwiML(callId, voicemailMessage);
-        
-        // Log voicemail
+        // Log voicemail (TwiML generation handled by OpenAI Realtime)
         await prisma.interaction.create({
           data: {
             callId: callId,
@@ -352,28 +133,20 @@ router.post('/recording/:callId', async (req, res) => {
 
 /**
  * POST /api/voice/incoming
- * Handle incoming calls (optional)
+ * Handle incoming calls (should redirect to website)
  */
 router.post('/incoming', (req, res) => {
   const { From, To } = req.body;
-  
-  const VoiceResponse = require('twilio').twiml.VoiceResponse;
-  const twiml = new VoiceResponse();
-  
-  twiml.say({
-    voice: 'alice',
-    language: 'en-US'
-  }, 'Thank you for calling. This number is used for outbound sales calls only. Please visit our website for more information.');
-  
-  twiml.hangup();
   
   DebugLogger.logSuccess('Incoming call handled', {
     from: From,
     to: To
   });
   
-  res.type('text/xml');
-  res.send(twiml.toString());
+  // Return simple message - incoming calls not supported in realtime mode
+  res.status(200).json({
+    message: 'Incoming calls not supported. This number is for outbound sales calls only.'
+  });
 });
 
 /**
@@ -475,15 +248,11 @@ router.get('/audio/:callId/:type', async (req, res) => {
   } catch (error) {
     DebugLogger.logCallError(callId, error, 'audio_generation');
     
-    // Fallback to simple text-to-speech if ElevenLabs fails
-    res.set('Content-Type', 'text/xml');
-    const fallbackTwiml = new VoiceResponse();
-    fallbackTwiml.say({
-      voice: 'alice',
-      language: 'en-US'
-    }, 'Hello, this is a call from Levco Real Estate Group.');
-    
-    res.send(fallbackTwiml.toString());
+    // Fallback - return error since ElevenLabs is required for realtime mode
+    res.status(500).json({
+      error: 'ElevenLabs audio generation failed',
+      message: 'Realistic voice synthesis is required for realtime conversations'
+    });
   }
 });
 

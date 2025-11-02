@@ -28,9 +28,6 @@ class TwilioVoiceService {
         leadName: `${leadData.firstName} ${leadData.lastName}`
       });
 
-      // Create TwiML URL for handling the call
-      const twimlUrl = `${process.env.BASE_URL}/api/voice/twiml/${callId}`;
-      
       const call = await this.client.calls.create({
         to: toNumber,
         from: this.phoneNumber,
@@ -62,108 +59,6 @@ class TwilioVoiceService {
       DebugLogger.logCallError(callId, error, 'twilio_initiation');
       throw error;
     }
-  }
-
-  /**
-   * Generate TwiML for AI conversation
-   * @param {string} callId - Call identifier
-   * @param {Object} leadData - Lead information
-   * @param {string} initialMessage - First AI message
-   */
-  generateInitialTwiML(callId, leadData, initialMessage) {
-    const VoiceResponse = twilio.twiml.VoiceResponse;
-    const twiml = new VoiceResponse();
-
-    // Use ElevenLabs generated audio instead of robotic TTS
-    const audioUrl = `${process.env.BASE_URL}/api/voice/audio/${callId}/greeting`;
-    twiml.play(audioUrl);
-
-    // Gather customer response with improved speech recognition
-    const gather = twiml.gather({
-      input: 'speech dtmf',
-      timeout: 15,
-      speechTimeout: 'auto',
-      speechModel: 'experimental_conversations',
-      enhanced: true,
-      language: 'en-US',
-      action: `/api/voice/gather/${callId}`,
-      method: 'POST',
-      partialResultCallback: `/api/voice/partial/${callId}`,
-      partialResultCallbackMethod: 'POST'
-    });
-
-    // If no response, try again
-    twiml.say({
-      voice: 'alice',
-      language: 'en-US'
-    }, "I didn't hear anything. Let me try that again.");
-
-    twiml.redirect(`/api/voice/twiml/${callId}`);
-
-    return twiml.toString();
-  }
-
-  /**
-   * Generate TwiML for continuing conversation
-   * @param {string} callId - Call identifier
-   * @param {string} aiResponse - AI-generated response
-   * @param {boolean} endCall - Whether to end the call
-   */
-  generateResponseTwiML(callId, aiResponse, endCall = false) {
-    const VoiceResponse = twilio.twiml.VoiceResponse;
-    const twiml = new VoiceResponse();
-
-    // Use ElevenLabs generated audio for AI response
-    const responseAudioUrl = `${process.env.BASE_URL}/api/voice/audio/${callId}/response`;
-    twiml.play(responseAudioUrl);
-
-    if (endCall) {
-      // End the call gracefully with ElevenLabs audio
-      const goodbyeAudioUrl = `${process.env.BASE_URL}/api/voice/audio/${callId}/goodbye`;
-      twiml.play(goodbyeAudioUrl);
-      
-      twiml.hangup();
-    } else {
-      // Continue gathering customer responses
-      const gather = twiml.gather({
-        input: 'speech',
-        timeout: 10,
-        speechTimeout: 'auto',
-        action: `/api/voice/gather/${callId}`,
-        method: 'POST'
-      });
-
-      // Fallback if no response
-      twiml.say({
-        voice: 'alice',
-        language: 'en-US'
-      }, "Are you still there?");
-      
-      twiml.redirect(`/api/voice/twiml/${callId}`);
-    }
-
-    return twiml.toString();
-  }
-
-  /**
-   * Handle voicemail detection
-   * @param {string} callId - Call identifier
-   * @param {string} voicemailMessage - Message to leave
-   */
-  generateVoicemailTwiML(callId, voicemailMessage) {
-    const VoiceResponse = twilio.twiml.VoiceResponse;
-    const twiml = new VoiceResponse();
-
-    // Leave voicemail message
-    twiml.say({
-      voice: 'alice',
-      language: 'en-US'
-    }, voicemailMessage);
-
-    // End the call
-    twiml.hangup();
-
-    return twiml.toString();
   }
 
   /**
