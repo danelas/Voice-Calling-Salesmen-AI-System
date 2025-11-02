@@ -38,6 +38,8 @@ function setupWebSocketServer(server) {
   console.log('🎙️ WebSocket server setup for realtime voice at /api/realtime-voice/websocket');
 
   wss.on('connection', async (ws, req) => {
+    console.log(`🔌 WebSocket connection attempt from URL: ${req.url}`);
+    
     const urlParts = req.url.split('/');
     const callId = urlParts[urlParts.length - 1];
     
