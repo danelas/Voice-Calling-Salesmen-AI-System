@@ -240,7 +240,7 @@ router.get('/audio/:callId/:type', async (req, res) => {
     console.log(`Generating audio for: "${textToSpeak.substring(0, 50)}..."`);
 
     // Generate realistic audio with ElevenLabs
-    const audioBuffer = await elevenLabs.generateSalesAudio(textToSpeak, call.lead);
+    const audioBuffer = await elevenLabs.generateSalesAudio(textToSpeak, 'professional', call.id);
     
     // Set proper headers for audio streaming
     res.set({
@@ -260,7 +260,7 @@ router.get('/audio/:callId/:type', async (req, res) => {
     
     try {
       // Try ElevenLabs one more time with simple text
-      const fallbackBuffer = await elevenLabs.generateSalesAudio(fallbackText, { firstName: 'there' });
+      const fallbackBuffer = await elevenLabs.generateSalesAudio(fallbackText, 'professional', call.id);
       res.set({
         'Content-Type': 'audio/mpeg',
         'Content-Length': fallbackBuffer.length,

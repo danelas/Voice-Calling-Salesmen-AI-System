@@ -274,7 +274,7 @@ router.post('/test-call', async (req, res) => {
       
       testResults.tests.elevenlabs = {
         success: true,
-        audioFile: audio.filename,
+        size: audio.length,
         textLength: testMessage.length
       };
       

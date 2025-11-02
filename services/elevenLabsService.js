@@ -18,15 +18,46 @@ class ElevenLabsService {
   async textToSpeech(text, voiceId = null) {
     try {
       const voice = voiceId || this.voiceId;
-      
-      // For now, return a simple success response since ElevenLabs might not be configured
-      // In production, this would generate actual audio
-      console.log(`TTS Request: "${text}" with voice ${voice}`);
-      
-      // Return a mock audio buffer for testing
-      return Buffer.from('mock-audio-data');
+      const axios = require('axios');
+
+      if (!this.apiKey) {
+        throw new Error('ELEVENLABS_API_KEY is missing');
+      }
+
+      console.log(`TTS Request: "${text.substring(0, 80)}..." with voice ${voice}`);
+
+      const url = `https://api.elevenlabs.io/v1/text-to-speech/${voice}`;
+      const response = await axios.post(
+        url,
+        {
+          text,
+          model_id: 'eleven_monolingual_v1',
+          voice_settings: {
+            stability: 0.55,
+            similarity_boost: 0.75,
+            use_speaker_boost: true
+          }
+        },
+        {
+          responseType: 'arraybuffer',
+          headers: {
+            'xi-api-key': this.apiKey,
+            'Content-Type': 'application/json',
+            'Accept': 'audio/mpeg'
+          },
+          timeout: 20000
+        }
+      );
+
+      const ct = (response.headers && response.headers['content-type']) || '';
+      if (!ct.includes('audio')) {
+        const txt = Buffer.from(response.data).toString('utf8');
+        throw new Error(`ElevenLabs returned non-audio content: ${txt.substring(0, 200)}`);
+      }
+
+      return Buffer.from(response.data);
     } catch (error) {
-      console.error('ElevenLabs TTS Error:', error);
+      console.error('ElevenLabs TTS Error:', error.message || error);
       throw new Error(`Failed to generate speech: ${error.message}`);
     }
   }
@@ -73,23 +104,16 @@ class ElevenLabsService {
    * @param {string} text - Text to speak
    * @param {string} emotion - Emotion/tone (enthusiastic, professional, friendly)
    * @param {string} callId - Call ID for file naming
-   * @returns {Promise<Object>} Audio file info
+   * @returns {Promise<Buffer>} Audio buffer
    */
   async generateSalesAudio(text, emotion = 'professional', callId) {
     try {
-      // For testing, return mock audio data
+      if (typeof emotion !== 'string') {
+        emotion = 'professional';
+      }
       console.log(`Generating ${emotion} audio for: "${text.substring(0, 50)}..."`);
-      
-      // Return mock audio file info
-      const filename = `call_${callId}_${Date.now()}.mp3`;
-      
-      return {
-        success: true,
-        filename: filename,
-        path: `/audio/${filename}`,
-        duration: Math.floor(text.length / 10), // Estimate duration
-        emotion: emotion
-      };
+      const buffer = await this.textToSpeech(text);
+      return buffer;
     } catch (error) {
       console.error('Error generating sales audio:', error);
       throw new Error(`Failed to generate sales audio: ${error.message}`);

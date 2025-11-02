@@ -91,7 +91,7 @@ router.post('/initiate', async (req, res) => {
       success: true,
       call: call,
       script: script,
-      audioFile: openingAudio.filename,
+      audioSize: openingAudio.length,
       message: 'Call initiated successfully'
     });
 

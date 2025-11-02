@@ -248,7 +248,7 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
       const ElevenLabsService = require('./elevenLabsService');
       const elevenLabs = new ElevenLabsService();
       
-      const audioBuffer = await elevenLabs.generateSalesAudio(text, connection.leadData);
+      const audioBuffer = await elevenLabs.generateSalesAudio(text, 'professional', callId);
       
       // Convert to base64 for Twilio
       const audioBase64 = audioBuffer.toString('base64');
