@@ -219,9 +219,8 @@ router.get('/audio/:callId/:type', async (req, res) => {
     let textToSpeak = '';
     
     if (type === 'greeting') {
-      // Generate initial greeting with OpenAI
-      const script = await openAI.generatePersonalizedScript(call.lead, 'cold');
-      textToSpeak = script.opening || `Hello, may I speak with ${call.lead.firstName} ${call.lead.lastName}, please? This is from Levco Real Estate Group, a local brokerage here in Hollywood. We are reaching out to homeowners because we have buyers looking in the area and want to know if you are interested in selling.`;
+      // Use simple, reliable greeting text
+      textToSpeak = `Hello, may I speak with ${call.lead.firstName} ${call.lead.lastName}, please? This is from Levco Real Estate Group, a local brokerage here in Hollywood. We are reaching out to homeowners because we have buyers looking in the area and want to know if you are interested in selling.`;
     } else if (type === 'goodbye') {
       textToSpeak = `Thank you for your time, ${call.lead.firstName}. We will be in your neighborhood this week with another homeowner, we can schedule to have one of our top agents meet you at your property as well. Have a great day!`;
     } else {
@@ -232,6 +231,13 @@ router.get('/audio/:callId/:type', async (req, res) => {
       
       textToSpeak = latestAiInteraction?.content || 'Hello, how can I help you today?';
     }
+
+    // Ensure textToSpeak is a string
+    if (typeof textToSpeak !== 'string' || !textToSpeak.trim()) {
+      textToSpeak = `Hello ${call.lead.firstName}, this is a call from Levco Real Estate Group.`;
+    }
+
+    console.log(`Generating audio for: "${textToSpeak.substring(0, 50)}..."`);
 
     // Generate realistic audio with ElevenLabs
     const audioBuffer = await elevenLabs.generateSalesAudio(textToSpeak, call.lead);
@@ -246,13 +252,26 @@ router.get('/audio/:callId/:type', async (req, res) => {
     res.send(audioBuffer);
     
   } catch (error) {
+    console.error(`❌ Audio generation error for ${callId}:`, error.message);
     DebugLogger.logCallError(callId, error, 'audio_generation');
     
-    // Fallback - return error since ElevenLabs is required for realtime mode
-    res.status(500).json({
-      error: 'ElevenLabs audio generation failed',
-      message: 'Realistic voice synthesis is required for realtime conversations'
-    });
+    // Return a simple audio response instead of crashing
+    const fallbackText = `Hello, this is a call from Levco Real Estate Group. We will call you back shortly.`;
+    
+    try {
+      // Try ElevenLabs one more time with simple text
+      const fallbackBuffer = await elevenLabs.generateSalesAudio(fallbackText, { firstName: 'there' });
+      res.set({
+        'Content-Type': 'audio/mpeg',
+        'Content-Length': fallbackBuffer.length,
+        'Cache-Control': 'no-cache'
+      });
+      res.send(fallbackBuffer);
+    } catch (fallbackError) {
+      console.error(`❌ Fallback audio generation failed:`, fallbackError.message);
+      // Return empty audio to prevent TwiML errors
+      res.status(204).send();
+    }
   }
 });
 
