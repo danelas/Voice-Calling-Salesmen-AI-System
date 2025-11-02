@@ -19,7 +19,7 @@ router.post('/stream/:callId', (req, res) => {
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
-        <Stream url="wss://${req.get('host')}/websocket/${callId}" />
+        <Stream url="wss://${req.get('host')}/websocket?callId=${callId}" />
     </Connect>
 </Response>`;
 
@@ -35,13 +35,14 @@ function setupWebSocketServer(server) {
     path: '/websocket'
   });
 
-  console.log('🎙️ WebSocket server setup for realtime voice at /api/realtime-voice/websocket');
+  console.log('🎙️ WebSocket server setup for realtime voice at /websocket');
 
   wss.on('connection', async (ws, req) => {
     console.log(`🔌 WebSocket connection attempt from URL: ${req.url}`);
     
     const urlParts = req.url.split('/');
-    const callId = urlParts[urlParts.length - 1];
+    const urlObj = new URL(req.url, 'http://localhost');
+    const callId = urlObj.searchParams.get('callId') || urlParts[urlParts.length - 1];
     
     console.log(`🔌 WebSocket connected for call ${callId} from URL: ${req.url}`);
     DebugLogger.logSuccess('WebSocket connected for call', { callId });
