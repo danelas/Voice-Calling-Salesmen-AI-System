@@ -19,7 +19,7 @@ router.post('/stream/:callId', (req, res) => {
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
-        <Stream url="wss://${req.get('host')}/api/realtime-voice/websocket/${callId}" />
+        <Stream url="wss://${req.get('host')}/websocket/${callId}" />
     </Connect>
 </Response>`;
 
@@ -32,13 +32,16 @@ router.post('/stream/:callId', (req, res) => {
 function setupWebSocketServer(server) {
   const wss = new WebSocket.Server({ 
     server,
-    path: '/api/realtime-voice/websocket'
+    path: '/websocket'
   });
+
+  console.log('🎙️ WebSocket server setup for realtime voice at /api/realtime-voice/websocket');
 
   wss.on('connection', async (ws, req) => {
     const urlParts = req.url.split('/');
     const callId = urlParts[urlParts.length - 1];
     
+    console.log(`🔌 WebSocket connected for call ${callId} from URL: ${req.url}`);
     DebugLogger.logSuccess('WebSocket connected for call', { callId });
 
     try {
@@ -59,30 +62,37 @@ function setupWebSocketServer(server) {
       ws.on('message', async (message) => {
         try {
           const data = JSON.parse(message);
+          console.log(`📞 Twilio message for ${callId}:`, data.event);
 
           switch (data.event) {
             case 'connected':
+              console.log(`✅ Twilio stream connected for ${callId}`);
               DebugLogger.logSuccess('Twilio stream connected', { callId });
               break;
 
             case 'start':
               streamSid = data.start.streamSid;
+              console.log(`🎬 Media stream started for ${callId} with SID: ${streamSid}`);
               DebugLogger.logSuccess('Media stream started', { callId, streamSid });
               
               // Start OpenAI realtime conversation
+              console.log(`🚀 Starting OpenAI realtime conversation for ${callId}`);
               await realtimeService.startRealtimeConversation(callId, call.lead, ws);
               break;
 
             case 'media':
               // Audio data from customer - handled by OpenAI service
+              // console.log(`🎵 Audio data received for ${callId}`);
               break;
 
             case 'stop':
+              console.log(`🛑 Media stream stopped for ${callId}`);
               DebugLogger.logSuccess('Media stream stopped', { callId });
               realtimeService.endConversation(callId);
               break;
           }
         } catch (error) {
+          console.error(`❌ WebSocket message error for ${callId}:`, error);
           DebugLogger.logCallError(callId, error, 'websocket_message');
         }
       });

@@ -37,6 +37,7 @@ class OpenAIRealtimeService {
 
       // Configure OpenAI session
       openaiWs.on('open', () => {
+        console.log(`🤖 OpenAI Realtime connected for call ${callId}`);
         DebugLogger.logSuccess('OpenAI Realtime connected', { callId });
         
         // Configure the session with lead context
@@ -69,8 +70,24 @@ class OpenAIRealtimeService {
 
       // Handle OpenAI messages
       openaiWs.on('message', async (data) => {
-        const message = JSON.parse(data.toString());
-        await this.handleOpenAIMessage(callId, message);
+        try {
+          const message = JSON.parse(data.toString());
+          console.log(`📨 OpenAI message for ${callId}:`, message.type);
+          await this.handleOpenAIMessage(callId, message);
+        } catch (error) {
+          console.error(`❌ Error handling OpenAI message for ${callId}:`, error);
+        }
+      });
+
+      // Handle OpenAI errors
+      openaiWs.on('error', (error) => {
+        console.error(`❌ OpenAI WebSocket error for ${callId}:`, error);
+        DebugLogger.logCallError(callId, error, 'openai_websocket');
+      });
+
+      // Handle OpenAI close
+      openaiWs.on('close', (code, reason) => {
+        console.log(`🔌 OpenAI WebSocket closed for ${callId}:`, code, reason.toString());
       });
 
       // Handle Twilio audio stream
