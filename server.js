@@ -48,6 +48,7 @@ const dashboardRoutes = require('./routes/dashboard');
 const debugRoutes = require('./routes/debug');
 const voiceRoutes = require('./routes/voice');
 const bulkRoutes = require('./routes/bulk');
+const { router: realtimeVoiceRoutes, setupWebSocketServer } = require('./routes/realtimeVoice');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -72,6 +73,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/debug', debugRoutes);
 app.use('/api/voice', voiceRoutes);
 app.use('/api/bulk', bulkRoutes);
+app.use('/api/realtime-voice', realtimeVoiceRoutes);
 
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
@@ -187,11 +189,15 @@ console.log('- ELEVENLABS_API_KEY:', process.env.ELEVENLABS_API_KEY ? 'Set' : 'M
 console.log('- OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? 'Set' : 'Missing');
 console.log('- BASE_URL:', process.env.BASE_URL || 'Not set');
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   logger.info(`🚀 Voice Sales AI server running on port ${PORT}`);
   logger.info(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   logger.info(`🔗 Health check: http://localhost:${PORT}/api/health`);
   logger.info(`🐛 Debug endpoint: http://localhost:${PORT}/api/debug/health`);
+  
+  // Set up WebSocket server for realtime voice
+  setupWebSocketServer(server);
+  logger.info(`🎙️ WebSocket server ready for realtime voice calls`);
   
   // Run database migrations after server starts (non-blocking)
   runMigrations().catch(err => {

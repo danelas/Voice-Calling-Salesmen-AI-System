@@ -34,7 +34,7 @@ class TwilioVoiceService {
       const call = await this.client.calls.create({
         to: toNumber,
         from: this.phoneNumber,
-        url: twimlUrl,
+        url: `${process.env.BASE_URL}/api/realtime-voice/stream/${callId}`, // Use realtime stream
         method: 'POST',
         record: true, // Record the call for analysis
         recordingStatusCallback: `${process.env.BASE_URL}/api/voice/recording/${callId}`,
