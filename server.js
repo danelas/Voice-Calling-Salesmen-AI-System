@@ -20,10 +20,16 @@ async function runMigrations() {
     const { promisify } = require('util');
     const execAsync = promisify(exec);
     
+    // Generate Prisma client first
+    await execAsync('npx prisma generate');
+    console.log('✅ Prisma client generated');
+    
+    // Push schema changes
     await execAsync('npx prisma db push --accept-data-loss');
     console.log('✅ Database migrations completed');
   } catch (error) {
     console.error('❌ Database migration failed:', error.message);
+    console.error('Full error:', error);
     // Don't exit the process, let the app try to run anyway
   }
 }
@@ -196,8 +202,13 @@ const server = app.listen(PORT, () => {
   logger.info(`🐛 Debug endpoint: http://localhost:${PORT}/api/debug/health`);
   
   // Set up WebSocket server for realtime voice
-  setupWebSocketServer(server);
-  logger.info(`🎙️ WebSocket server ready for realtime voice calls`);
+  try {
+    setupWebSocketServer(server);
+    console.log('🎙️ WebSocket server setup completed successfully');
+    logger.info(`🎙️ WebSocket server ready for realtime voice calls`);
+  } catch (error) {
+    console.error('❌ WebSocket server setup failed:', error);
+  }
   
   // Run database migrations after server starts (non-blocking)
   runMigrations().catch(err => {
