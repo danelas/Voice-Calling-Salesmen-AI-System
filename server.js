@@ -28,6 +28,18 @@ async function runMigrations() {
   }
 }
 
+// Add startup error handling
+process.on('uncaughtException', (error) => {
+  console.error('💥 Uncaught Exception:', error);
+  console.error('Stack:', error.stack);
+  // Don't exit immediately, log the error
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit immediately, log the error
+});
+
 // Import routes
 const callRoutes = require('./routes/calls');
 const leadRoutes = require('./routes/leads');
@@ -167,14 +179,24 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-app.listen(PORT, async () => {
+// Test environment variables before starting
+console.log('🔍 Environment Check:');
+console.log('- DATABASE_URL:', process.env.DATABASE_URL ? 'Set' : 'Missing');
+console.log('- TWILIO_ACCOUNT_SID:', process.env.TWILIO_ACCOUNT_SID ? 'Set' : 'Missing');
+console.log('- ELEVENLABS_API_KEY:', process.env.ELEVENLABS_API_KEY ? 'Set' : 'Missing');
+console.log('- OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? 'Set' : 'Missing');
+console.log('- BASE_URL:', process.env.BASE_URL || 'Not set');
+
+app.listen(PORT, () => {
   logger.info(`🚀 Voice Sales AI server running on port ${PORT}`);
   logger.info(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   logger.info(`🔗 Health check: http://localhost:${PORT}/api/health`);
   logger.info(`🐛 Debug endpoint: http://localhost:${PORT}/api/debug/health`);
   
-  // Run database migrations after server starts
-  await runMigrations();
+  // Run database migrations after server starts (non-blocking)
+  runMigrations().catch(err => {
+    console.error('Migration failed but server continues:', err.message);
+  });
   
   DebugLogger.logSuccess('Server startup', {
     port: PORT,
