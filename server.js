@@ -54,6 +54,7 @@ const dashboardRoutes = require('./routes/dashboard');
 const debugRoutes = require('./routes/debug');
 const voiceRoutes = require('./routes/voice');
 const bulkRoutes = require('./routes/bulk');
+const simpleVoiceRoutes = require('./routes/simpleVoice');
 const { router: realtimeVoiceRoutes, setupWebSocketServer } = require('./routes/realtimeVoice');
 
 const app = express();
@@ -79,6 +80,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/debug', debugRoutes);
 app.use('/api/voice', voiceRoutes);
 app.use('/api/bulk', bulkRoutes);
+app.use('/api/simple-voice', simpleVoiceRoutes);
 app.use('/api/realtime-voice', realtimeVoiceRoutes);
 
 // Health check endpoint
@@ -201,14 +203,10 @@ const server = app.listen(PORT, () => {
   logger.info(`🔗 Health check: http://localhost:${PORT}/api/health`);
   logger.info(`🐛 Debug endpoint: http://localhost:${PORT}/api/debug/health`);
   
-  // Set up WebSocket server for realtime voice
-  try {
-    setupWebSocketServer(server);
-    console.log('🎙️ WebSocket server setup completed successfully');
-    logger.info(`🎙️ WebSocket server ready for realtime voice calls`);
-  } catch (error) {
-    console.error('❌ WebSocket server setup failed:', error);
-  }
+  // WebSocket server temporarily disabled to prevent crashes
+  // Will re-enable after fixing OpenAI Realtime API integration
+  console.log('🎙️ Using simple voice mode (WebSocket disabled temporarily)');
+  logger.info(`🎙️ Simple voice mode active - calls will work without crashes`);
   
   // Run database migrations after server starts (non-blocking)
   runMigrations().catch(err => {
