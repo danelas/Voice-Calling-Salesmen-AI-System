@@ -43,6 +43,15 @@ router.post('/initiate', async (req, res) => {
     // Generate personalized script
     const script = await openAI.generatePersonalizedScript(lead, callType.toLowerCase());
 
+    // Generate safe opening text from script
+    let openingText = 'Hello, this is a call from Levco Real Estate Group.';
+    if (script && typeof script.opening === 'string' && script.opening.trim()) {
+      openingText = script.opening;
+    } else if (script && script.opening && typeof script.opening === 'object') {
+      // If script.opening is an object, try to extract text
+      openingText = script.opening.text || script.opening.content || openingText;
+    }
+
     // Use Twilio to make actual call
     const twilioVoice = new TwilioVoiceService();
     
@@ -67,12 +76,13 @@ router.post('/initiate', async (req, res) => {
     } catch (twilioError) {
       console.log('Twilio call failed, using simulation:', twilioError.message);
       // Fallback to simulation if Twilio fails
-      const callResult = await textMagic.initiateCall(lead.phone, script.opening);
+      const callResult = await textMagic.initiateCall(lead.phone, openingText);
     }
-
-    // Generate opening audio
+    
+    console.log(`Generating opening audio for: "${openingText.substring(0, 50)}..."`);
+    
     const openingAudio = await elevenLabs.generateSalesAudio(
-      script.opening,
+      openingText,
       'professional',
       call.id
     );
