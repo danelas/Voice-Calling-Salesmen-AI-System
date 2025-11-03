@@ -35,6 +35,7 @@ class OpenAIRealtimeService {
         hasCommittedAudio: false,
         openaiConnected: false,
         openaiConnecting: false,
+        flushing: false,
       });
 
       // Start the conversation with a spoken greeting (no OpenAI yet)
@@ -239,13 +240,13 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
       connection.pcmBuffer = Buffer.concat([connection.pcmBuffer, chunk]);
       connection.lastAudioAt = Date.now();
 
-      // Debounced commit to OpenAI (aggregate ~200ms)
+      // Debounced commit to OpenAI (aggregate ~280ms)
       if (!connection.commitTimer) {
         connection.commitTimer = setTimeout(() => {
           this.flushAudioToOpenAI(callId).catch(err => {
             DebugLogger.logCallError(callId, err, 'audio_flush');
           });
-        }, 220);
+        }, 280);
       }
     } catch (e) {
       DebugLogger.logCallError(callId, e, 'twilio_media_handle');
@@ -274,6 +275,16 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
       return;
     }
 
+    if (connection.flushing) {
+      // avoid overlapping flushes; try again shortly
+      clearTimeout(connection.commitTimer);
+      connection.commitTimer = setTimeout(() => {
+        this.flushAudioToOpenAI(callId).catch(err => DebugLogger.logCallError(callId, err, 'audio_flush_overlap_retry'));
+      }, 120);
+      return;
+    }
+    connection.flushing = true;
+
     const pcm = connection.pcmBuffer;
     connection.pcmBuffer = Buffer.alloc(0);
     clearTimeout(connection.commitTimer);
@@ -281,17 +292,45 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
 
     if (!pcm || pcm.length === 0) return;
 
-    // Ensure at least 100ms of audio buffered before commit
+    // Ensure at least X ms of audio buffered before commit
     const sampleRate = this.connections.get(callId)?.sampleRateHz || 8000;
-    const firstCommitMinMs = connection.hasCommittedAudio ? 100 : 300;
-    const minSamples = Math.ceil(sampleRate * (firstCommitMinMs / 1000));
+    const thresholdMs = connection.hasCommittedAudio ? 160 : 360; // stricter thresholds
+    const minSamples = Math.ceil(sampleRate * (thresholdMs / 1000));
     const minBytes = minSamples * 2; // PCM16 bytes/sample
+    const currentMs = Math.round((pcm.length / 2) / sampleRate * 1000);
     if (pcm.length < minBytes) {
-      // Re-append to buffer and re-schedule
+      // If we are very close (e.g., within 10ms), pad with silence to reach threshold
+      const gapMs = thresholdMs - currentMs;
+      if (gapMs > 0 && gapMs <= 10) {
+        const padSamples = Math.ceil(sampleRate * (gapMs / 1000));
+        const padBytes = padSamples * 2;
+        const padded = Buffer.concat([pcm, Buffer.alloc(padBytes)]);
+        try {
+          console.log(`🔇 Padding ${padBytes} bytes (~${gapMs}ms) before commit for ${callId}`);
+        } catch {}
+        // Replace pcm with padded buffer for this commit
+        connection.pcmBuffer = Buffer.alloc(0);
+        clearTimeout(connection.commitTimer);
+        connection.commitTimer = null;
+
+        const audioAppendPad = {
+          type: 'input_audio_buffer.append',
+          audio: padded.toString('base64')
+        };
+        connection.openaiWs.send(JSON.stringify(audioAppendPad));
+        const commitPad = { type: 'input_audio_buffer.commit' };
+        connection.openaiWs.send(JSON.stringify(commitPad));
+        connection.hasCommittedAudio = true;
+        connection.flushing = false;
+        return;
+      }
+
+      // Not enough audio yet: re-append and re-schedule
       connection.pcmBuffer = Buffer.concat([pcm, connection.pcmBuffer]);
       connection.commitTimer = setTimeout(() => {
         this.flushAudioToOpenAI(callId).catch(err => DebugLogger.logCallError(callId, err, 'audio_flush_reschedule'));
-      }, 150);
+      }, 160);
+      connection.flushing = false;
       return;
     }
 
@@ -310,6 +349,7 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
     const commit = { type: 'input_audio_buffer.commit' };
     connection.openaiWs.send(JSON.stringify(commit));
     connection.hasCommittedAudio = true;
+    connection.flushing = false;
   }
 
   /**
@@ -362,6 +402,16 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
         const message = JSON.parse(data.toString());
         console.log(`📨 OpenAI message for ${callId}:`, message.type);
         await this.handleOpenAIMessage(callId, message);
+        if (message.type === 'error' && message.error && typeof message.error.message === 'string' && message.error.message.includes('buffer too small')) {
+          // Try scheduling another flush with more audio
+          const conn = this.connections.get(callId);
+          if (conn) {
+            clearTimeout(conn.commitTimer);
+            conn.commitTimer = setTimeout(() => {
+              this.flushAudioToOpenAI(callId).catch(err => DebugLogger.logCallError(callId, err, 'retry_after_small_buffer'));
+            }, 200);
+          }
+        }
       } catch (error) {
         console.error(`❌ Error handling OpenAI message for ${callId}:`, error);
       }
