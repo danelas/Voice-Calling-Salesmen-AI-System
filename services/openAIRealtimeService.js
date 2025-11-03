@@ -418,7 +418,6 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
           input_audio_format: 'pcm16',
           output_audio_format: 'pcm16',
           input_audio_transcription: { model: 'whisper-1' },
-          turn_detection: { type: 'server_vad', threshold: 0.35, prefix_padding_ms: 200, silence_duration_ms: 250 },
           tools: [],
           tool_choice: 'auto',
           temperature: 0.8,
