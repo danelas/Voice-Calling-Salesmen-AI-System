@@ -2,6 +2,17 @@ const WebSocket = require('ws');
 const { DebugLogger } = require('../utils/logger');
 const { muLawBase64ToPCM16, mp3ToMulawChunks, sleep } = require('../utils/audioUtils');
 
+// Simple RMS calculator for PCM16LE buffers
+function computeRmsPCM16LE(buf) {
+  let sum = 0;
+  const n = (buf.length / 2) | 0;
+  for (let i = 0; i < n; i++) {
+    const s = buf.readInt16LE(i * 2);
+    sum += s * s;
+  }
+  return n ? Math.sqrt(sum / n) : 0;
+}
+
 class OpenAIRealtimeService {
   constructor() {
     this.apiKey = process.env.OPENAI_API_KEY;
@@ -242,14 +253,28 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
       connection.pcmBuffer = Buffer.concat([connection.pcmBuffer, chunk]);
       connection.lastAudioAt = Date.now();
 
-      // Debounced commit to OpenAI (aggregate ~280ms)
+      // Debounced commit to OpenAI (aggregate ~110ms)
       if (!connection.commitTimer) {
         connection.commitTimer = setTimeout(() => {
           this.flushAudioToOpenAI(callId).catch(err => {
             DebugLogger.logCallError(callId, err, 'audio_flush');
           });
-        }, 280);
+        }, 110);
       }
+
+      // Energy-based early commit: if voiced and we already have >=100ms buffered, flush sooner
+      try {
+        const sampleRate = connection.sampleRateHz || 8000;
+        const minBytes100 = Math.ceil(sampleRate * 0.1) * 2;
+        const rms = computeRmsPCM16LE(chunk);
+        const RMS_THRESHOLD = 400; // tune as needed for "yes"
+        if (rms > RMS_THRESHOLD && connection.pcmBuffer.length >= minBytes100) {
+          if (connection.commitTimer) clearTimeout(connection.commitTimer);
+          connection.commitTimer = setTimeout(() => {
+            this.flushAudioToOpenAI(callId).catch(err => DebugLogger.logCallError(callId, err, 'audio_flush_early'));
+          }, 20);
+        }
+      } catch {}
     } catch (e) {
       DebugLogger.logCallError(callId, e, 'twilio_media_handle');
     }
@@ -305,14 +330,14 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
 
     if (!pcm || pcm.length === 0) return;
 
-    // Ensure at least X ms of audio buffered before commit
+    // Ensure at least ~100ms of audio buffered before commit
     const sampleRate = this.connections.get(callId)?.sampleRateHz || 8000;
-    const thresholdMs = connection.hasCommittedAudio ? 160 : 360; // stricter thresholds
+    const thresholdMs = 100;
     const minSamples = Math.ceil(sampleRate * (thresholdMs / 1000));
     const minBytes = minSamples * 2; // PCM16 bytes/sample
     const currentMs = Math.round((pcm.length / 2) / sampleRate * 1000);
     if (pcm.length < minBytes) {
-      // If we are very close (e.g., within 10ms), pad with silence to reach threshold
+      // If we are very close (<=10ms), pad with silence to reach threshold
       const gapMs = thresholdMs - currentMs;
       if (gapMs > 0 && gapMs <= 10) {
         const padSamples = Math.ceil(sampleRate * (gapMs / 1000));
@@ -343,7 +368,7 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
       connection.pcmBuffer = Buffer.concat([pcm, connection.pcmBuffer]);
       connection.commitTimer = setTimeout(() => {
         this.flushAudioToOpenAI(callId).catch(err => DebugLogger.logCallError(callId, err, 'audio_flush_reschedule'));
-      }, 160);
+      }, 60);
       connection.flushing = false;
       return;
     }
@@ -399,7 +424,7 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
           input_audio_format: inputFormat,
           output_audio_format: 'pcm16',
           input_audio_transcription: { model: 'whisper-1' },
-          turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 500 },
+          turn_detection: { type: 'server_vad', threshold: 0.35, prefix_padding_ms: 200, silence_duration_ms: 250 },
           tools: [],
           tool_choice: 'auto',
           temperature: 0.8,
@@ -421,19 +446,8 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
             conn.sessionReady = true;
             console.log(`✅ OpenAI session updated for ${callId}`);
             if (!conn.primed) {
-              try {
-                const sr = conn.sampleRateHz || 8000;
-                const primeMs = 400; // ~400ms of silence to ensure stability
-                const primeSamples = Math.ceil(sr * (primeMs / 1000));
-                const primeBytes = primeSamples * 2; // PCM16
-                const silence = Buffer.alloc(primeBytes);
-                conn.openaiWs.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: silence.toString('base64') }), () => {
-                  try { conn.openaiWs.send(JSON.stringify({ type: 'input_audio_buffer.commit' })); } catch {}
-                });
-                console.log(`🔈 Primed OpenAI input buffer with ${primeBytes} bytes (~${primeMs}ms) of silence for ${callId}`);
-                conn.primed = true;
-                conn.hasCommittedAudio = true;
-              } catch {}
+              conn.primed = true;
+              console.log(`🟢 OpenAI session ready (no priming) for ${callId}`);
             }
             if (conn.pcmBuffer && conn.pcmBuffer.length > 0 && !conn.commitTimer) {
               conn.commitTimer = setTimeout(() => {
