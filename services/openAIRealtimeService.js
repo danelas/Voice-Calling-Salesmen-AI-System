@@ -18,19 +18,11 @@ class OpenAIRealtimeService {
    * @param {Object} leadData - Lead information for personalization
    * @param {Object} twilioStream - Twilio media stream
    */
-  async startRealtimeConversation(callId, leadData, twilioStream) {
+  async startRealtimeConversation(callId, leadData, twilioStream, mediaInfo = null) {
     try {
-      // Connect to OpenAI Realtime API
-      const openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01', {
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'OpenAI-Beta': 'realtime=v1'
-        }
-      });
-
-      // Store connection
+      // Store connection (OpenAI WS will be connected lazily on first audio)
       this.connections.set(callId, {
-        openaiWs,
+        openaiWs: null,
         twilioStream,
         leadData,
         conversationHistory: [],
@@ -38,69 +30,14 @@ class OpenAIRealtimeService {
         pcmBuffer: Buffer.alloc(0),
         commitTimer: null,
         lastAudioAt: 0,
-        mediaEncoding: 'audio/x-mulaw;rate=8000',
-        sampleRateHz: 8000,
+        mediaEncoding: (mediaInfo && mediaInfo.encoding) ? mediaInfo.encoding : 'audio/x-mulaw;rate=8000',
+        sampleRateHz: (mediaInfo && mediaInfo.sampleRate) ? mediaInfo.sampleRate : 8000,
         hasCommittedAudio: false,
+        openaiConnected: false,
+        openaiConnecting: false,
       });
 
-      // Configure OpenAI session
-      openaiWs.on('open', () => {
-        console.log(`🤖 OpenAI Realtime connected for call ${callId}`);
-        DebugLogger.logSuccess('OpenAI Realtime connected', { callId });
-        
-        // Configure the session with lead context
-        const sessionConfig = {
-          type: 'session.update',
-          session: {
-            modalities: ['text', 'audio'],
-            instructions: this.buildRealtimeInstructions(leadData),
-            voice: 'alloy', // Will be replaced with ElevenLabs
-            input_audio_format: 'pcm16',
-            output_audio_format: 'pcm16',
-            input_audio_transcription: {
-              model: 'whisper-1'
-            },
-            turn_detection: {
-              type: 'server_vad',
-              threshold: 0.5,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 500
-            },
-            tools: [],
-            tool_choice: 'auto',
-            temperature: 0.8,
-            max_response_output_tokens: 4096
-          }
-        };
-        
-        openaiWs.send(JSON.stringify(sessionConfig));
-      });
-
-      // Handle OpenAI messages
-      openaiWs.on('message', async (data) => {
-        try {
-          const message = JSON.parse(data.toString());
-          console.log(`📨 OpenAI message for ${callId}:`, message.type);
-          await this.handleOpenAIMessage(callId, message);
-        } catch (error) {
-          console.error(`❌ Error handling OpenAI message for ${callId}:`, error);
-        }
-      });
-
-      // Handle OpenAI errors
-      openaiWs.on('error', (error) => {
-        console.error(`❌ OpenAI WebSocket error for ${callId}:`, error);
-        DebugLogger.logCallError(callId, error, 'openai_websocket');
-      });
-
-      // Handle OpenAI close
-      openaiWs.on('close', (code, reason) => {
-        console.log(`🔌 OpenAI WebSocket closed for ${callId}:`, code, reason.toString());
-      });
-
-      // Twilio media is handled via realtimeVoice -> handleTwilioMedia
-
-      // Start the conversation
+      // Start the conversation with a spoken greeting (no OpenAI yet)
       this.initiateGreeting(callId);
 
     } catch (error) {
@@ -287,21 +224,19 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
    */
   async handleTwilioMedia(callId, muLawBase64) {
     const connection = this.connections.get(callId);
-    if (!connection || !connection.openaiWs || connection.openaiWs.readyState !== WebSocket.OPEN) return;
+    if (!connection) return;
 
     try {
-      let pcm16;
       const enc = (connection.mediaEncoding || '').toLowerCase();
+      let chunk;
       if (enc.includes('mulaw')) {
-        pcm16 = muLawBase64ToPCM16(muLawBase64);
-      } else if (enc.includes('l16') || enc.includes('pcm')) {
-        // Payload already PCM16 LE
-        pcm16 = Buffer.from(muLawBase64, 'base64');
+        // Decode mu-law to PCM16
+        chunk = muLawBase64ToPCM16(muLawBase64);
       } else {
-        // Default to mu-law
-        pcm16 = muLawBase64ToPCM16(muLawBase64);
+        // Already PCM16 little-endian
+        chunk = Buffer.from(muLawBase64, 'base64');
       }
-      connection.pcmBuffer = Buffer.concat([connection.pcmBuffer, pcm16]);
+      connection.pcmBuffer = Buffer.concat([connection.pcmBuffer, chunk]);
       connection.lastAudioAt = Date.now();
 
       // Debounced commit to OpenAI (aggregate ~200ms)
@@ -322,7 +257,22 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
    */
   async flushAudioToOpenAI(callId) {
     const connection = this.connections.get(callId);
-    if (!connection || !connection.openaiWs || connection.openaiWs.readyState !== WebSocket.OPEN) return;
+    if (!connection) return;
+
+    // Ensure OpenAI connection is ready; if not, kick off connect and retry later
+    if (!connection.openaiWs || connection.openaiWs.readyState !== WebSocket.OPEN) {
+      if (!connection.openaiConnecting) {
+        this.ensureOpenAIConnected(callId).catch(err => DebugLogger.logCallError(callId, err, 'openai_connect'));
+      }
+      // keep buffer intact and retry shortly if we have audio
+      if (connection.pcmBuffer && connection.pcmBuffer.length > 0) {
+        clearTimeout(connection.commitTimer);
+        connection.commitTimer = setTimeout(() => {
+          this.flushAudioToOpenAI(callId).catch(err => DebugLogger.logCallError(callId, err, 'audio_flush_retry'));
+        }, 150);
+      }
+      return;
+    }
 
     const pcm = connection.pcmBuffer;
     connection.pcmBuffer = Buffer.alloc(0);
@@ -333,16 +283,23 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
 
     // Ensure at least 100ms of audio buffered before commit
     const sampleRate = this.connections.get(callId)?.sampleRateHz || 8000;
-    const minSamples = Math.ceil(sampleRate * 0.1); // 100ms
-    const minBytes = minSamples * 2; // PCM16 = 2 bytes/sample
+    const firstCommitMinMs = connection.hasCommittedAudio ? 100 : 300;
+    const minSamples = Math.ceil(sampleRate * (firstCommitMinMs / 1000));
+    const minBytes = minSamples * 2; // PCM16 bytes/sample
     if (pcm.length < minBytes) {
       // Re-append to buffer and re-schedule
       connection.pcmBuffer = Buffer.concat([pcm, connection.pcmBuffer]);
       connection.commitTimer = setTimeout(() => {
         this.flushAudioToOpenAI(callId).catch(err => DebugLogger.logCallError(callId, err, 'audio_flush_reschedule'));
-      }, 120);
+      }, 150);
       return;
     }
+
+    // Minimal debug for audio commit size
+    try {
+      const ms = Math.round((pcm.length / 2) / sampleRate * 1000);
+      console.log(`🔊 Committing ${pcm.length} bytes (~${ms}ms) to OpenAI for ${callId}`);
+    } catch {}
 
     const audioAppend = {
       type: 'input_audio_buffer.append',
@@ -356,6 +313,76 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
   }
 
   /**
+   * Lazily connect to OpenAI Realtime and configure session
+   */
+  async ensureOpenAIConnected(callId) {
+    const connection = this.connections.get(callId);
+    if (!connection || connection.openaiConnected || connection.openaiConnecting) return;
+    connection.openaiConnecting = true;
+
+    const openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01', {
+      headers: {
+        'Authorization': `Bearer ${this.apiKey}`,
+        'OpenAI-Beta': 'realtime=v1'
+      }
+    });
+
+    connection.openaiWs = openaiWs;
+
+    openaiWs.on('open', () => {
+      console.log(`🤖 OpenAI Realtime connected for call ${callId}`);
+      DebugLogger.logSuccess('OpenAI Realtime connected', { callId });
+
+      const conn = this.connections.get(callId);
+      // Always use PCM16 to avoid format mismatches; decode mulaw to PCM16 ourselves
+      let inputFormat = { type: 'pcm16', sample_rate_hz: (conn?.sampleRateHz || 8000), channels: 1, endianness: 'little' };
+      const sessionConfig = {
+        type: 'session.update',
+        session: {
+          modalities: ['text', 'audio'],
+          instructions: this.buildRealtimeInstructions(conn.leadData),
+          voice: 'alloy',
+          input_audio_format: inputFormat,
+          output_audio_format: 'pcm16',
+          input_audio_transcription: { model: 'whisper-1' },
+          turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 500 },
+          tools: [],
+          tool_choice: 'auto',
+          temperature: 0.8,
+          max_response_output_tokens: 4096
+        }
+      };
+      openaiWs.send(JSON.stringify(sessionConfig));
+      connection.openaiConnected = true;
+      connection.openaiConnecting = false;
+    });
+
+    openaiWs.on('message', async (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        console.log(`📨 OpenAI message for ${callId}:`, message.type);
+        await this.handleOpenAIMessage(callId, message);
+      } catch (error) {
+        console.error(`❌ Error handling OpenAI message for ${callId}:`, error);
+      }
+    });
+
+    openaiWs.on('error', (error) => {
+      console.error(`❌ OpenAI WebSocket error for ${callId}:`, error);
+      DebugLogger.logCallError(callId, error, 'openai_websocket');
+    });
+
+    openaiWs.on('close', (code, reason) => {
+      console.log(`🔌 OpenAI WebSocket closed for ${callId}:`, code, reason?.toString?.());
+      const conn = this.connections.get(callId);
+      if (conn) {
+        conn.openaiConnected = false;
+        conn.openaiConnecting = false;
+      }
+    });
+  }
+
+  /**
    * Start the conversation with a greeting
    */
   async initiateGreeting(callId) {
@@ -364,10 +391,7 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
 
     const greeting = `Hello, is this ${connection.leadData.firstName} ${connection.leadData.lastName}?`;
     
-    // Do not request OpenAI response yet; speak greeting via ElevenLabs immediately
-    // After first user speech transcription completes, we'll create a response.
-
-    // Also immediately speak the greeting with ElevenLabs so caller hears audio promptly
+    // Speak greeting with ElevenLabs so caller hears audio promptly
     try {
       await this.convertToElevenLabsAudio(callId, greeting);
     } catch (e) {

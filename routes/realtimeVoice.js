@@ -110,7 +110,11 @@ function setupWebSocketServer(server) {
                 console.warn('⚠️ Unable to set media format from start event');
               }
 
-              await realtimeService.startRealtimeConversation(callId, call.lead, ws);
+              const mf = data.start.mediaFormat || data.start.media || {};
+              await realtimeService.startRealtimeConversation(callId, call.lead, ws, {
+                encoding: mf.encoding,
+                sampleRate: mf.sampleRate
+              });
               if (streamSid) {
                 if (typeof realtimeService.setStreamSid === 'function') {
                   realtimeService.setStreamSid(callId, streamSid);
