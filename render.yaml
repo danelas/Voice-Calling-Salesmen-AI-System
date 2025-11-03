@@ -1,11 +1,10 @@
 services:
   - type: web
     name: voice-sales-ai
-    runtime: docker
+    runtime: node
     plan: starter
     region: virginia
     branch: main
-    buildCommand: echo "Building with Docker..."
     startCommand: npm start
     envVars:
       - key: NODE_ENV
@@ -14,6 +13,10 @@ services:
         value: postgresql://aivoicecall_user:iupGwJfXz1yU2e9oKcV9Bjx9JueSdUxW@dpg-d42kvc24d50c739qvgc0-a.virginia-postgres.render.com/aivoicecall
       - key: PORT
         value: 10000
+      - key: FEATURE_REALTIME
+        value: on
+      - key: BASE_URL
+        value: https://voice-calling-salesmen-ai-system.onrender.com
       - key: OPENAI_API_KEY
         sync: false
       - key: ELEVENLABS_API_KEY
