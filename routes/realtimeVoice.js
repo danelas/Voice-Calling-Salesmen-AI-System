@@ -98,6 +98,18 @@ function setupWebSocketServer(server) {
                 ws.close(1000, 'Call not found');
                 return;
               }
+
+              // Capture Twilio media format (encoding/sampleRate)
+              try {
+                const mf = data.start.mediaFormat || data.start.media || {};
+                if (mf.encoding || mf.sampleRate) {
+                  realtimeService.setMediaFormat(callId, mf.encoding, mf.sampleRate);
+                  console.log(`🎚️ Media format: encoding=${mf.encoding} sampleRate=${mf.sampleRate}`);
+                }
+              } catch (e) {
+                console.warn('⚠️ Unable to set media format from start event');
+              }
+
               await realtimeService.startRealtimeConversation(callId, call.lead, ws);
               if (streamSid) {
                 if (typeof realtimeService.setStreamSid === 'function') {

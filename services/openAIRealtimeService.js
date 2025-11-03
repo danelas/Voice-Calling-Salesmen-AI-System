@@ -38,6 +38,9 @@ class OpenAIRealtimeService {
         pcmBuffer: Buffer.alloc(0),
         commitTimer: null,
         lastAudioAt: 0,
+        mediaEncoding: 'audio/x-mulaw;rate=8000',
+        sampleRateHz: 8000,
+        hasCommittedAudio: false,
       });
 
       // Configure OpenAI session
@@ -52,7 +55,7 @@ class OpenAIRealtimeService {
             modalities: ['text', 'audio'],
             instructions: this.buildRealtimeInstructions(leadData),
             voice: 'alloy', // Will be replaced with ElevenLabs
-            input_audio_format: { type: 'pcm16', sample_rate_hz: 8000, channels: 1, endianness: 'little' },
+            input_audio_format: 'pcm16',
             output_audio_format: 'pcm16',
             input_audio_transcription: {
               model: 'whisper-1'
@@ -287,7 +290,17 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
     if (!connection || !connection.openaiWs || connection.openaiWs.readyState !== WebSocket.OPEN) return;
 
     try {
-      const pcm16 = muLawBase64ToPCM16(muLawBase64);
+      let pcm16;
+      const enc = (connection.mediaEncoding || '').toLowerCase();
+      if (enc.includes('mulaw')) {
+        pcm16 = muLawBase64ToPCM16(muLawBase64);
+      } else if (enc.includes('l16') || enc.includes('pcm')) {
+        // Payload already PCM16 LE
+        pcm16 = Buffer.from(muLawBase64, 'base64');
+      } else {
+        // Default to mu-law
+        pcm16 = muLawBase64ToPCM16(muLawBase64);
+      }
       connection.pcmBuffer = Buffer.concat([connection.pcmBuffer, pcm16]);
       connection.lastAudioAt = Date.now();
 
@@ -319,7 +332,7 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
     if (!pcm || pcm.length === 0) return;
 
     // Ensure at least 100ms of audio buffered before commit
-    const sampleRate = 8000; // Twilio Media Streams are 8kHz
+    const sampleRate = this.connections.get(callId)?.sampleRateHz || 8000;
     const minSamples = Math.ceil(sampleRate * 0.1); // 100ms
     const minBytes = minSamples * 2; // PCM16 = 2 bytes/sample
     if (pcm.length < minBytes) {
@@ -339,6 +352,7 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
 
     const commit = { type: 'input_audio_buffer.commit' };
     connection.openaiWs.send(JSON.stringify(commit));
+    connection.hasCommittedAudio = true;
   }
 
   /**
@@ -350,30 +364,15 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
 
     const greeting = `Hello, is this ${connection.leadData.firstName} ${connection.leadData.lastName}?`;
     
-    // Send greeting to OpenAI to start the conversation
-    const greetingMessage = {
-      type: 'conversation.item.create',
-      item: {
-        type: 'message',
-        role: 'assistant',
-        content: [{
-          type: 'text',
-          text: greeting
-        }]
-      }
-    };
+    // Do not request OpenAI response yet; speak greeting via ElevenLabs immediately
+    // After first user speech transcription completes, we'll create a response.
 
-    connection.openaiWs.send(JSON.stringify(greetingMessage));
-    
-    // Trigger response generation
-    const responseCreate = {
-      type: 'response.create',
-      response: {
-        modalities: ['text', 'audio']
-      }
-    };
-    
-    connection.openaiWs.send(JSON.stringify(responseCreate));
+    // Also immediately speak the greeting with ElevenLabs so caller hears audio promptly
+    try {
+      await this.convertToElevenLabsAudio(callId, greeting);
+    } catch (e) {
+      DebugLogger.logCallError(callId, e, 'greeting_tts');
+    }
   }
 
   /**
