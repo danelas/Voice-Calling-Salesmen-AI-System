@@ -393,6 +393,20 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
         }
       };
       openaiWs.send(JSON.stringify(sessionConfig));
+
+      // Prime the input buffer with a short silence to avoid 0ms commit errors
+      try {
+        const sr = conn?.sampleRateHz || 8000;
+        const primeMs = 240; // ~240ms of silence
+        const primeSamples = Math.ceil(sr * (primeMs / 1000));
+        const primeBytes = primeSamples * 2; // PCM16
+        const silence = Buffer.alloc(primeBytes);
+        openaiWs.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: silence.toString('base64') }));
+        openaiWs.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+        console.log(`🔈 Primed OpenAI input buffer with ${primeBytes} bytes (~${primeMs}ms) of silence for ${callId}`);
+        const c = this.connections.get(callId);
+        if (c) c.hasCommittedAudio = true;
+      } catch {}
       connection.openaiConnected = true;
       connection.openaiConnecting = false;
     });
@@ -406,6 +420,7 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
           // Try scheduling another flush with more audio
           const conn = this.connections.get(callId);
           if (conn) {
+            conn.hasCommittedAudio = false; // reapply stricter thresholds
             clearTimeout(conn.commitTimer);
             conn.commitTimer = setTimeout(() => {
               this.flushAudioToOpenAI(callId).catch(err => DebugLogger.logCallError(callId, err, 'retry_after_small_buffer'));
