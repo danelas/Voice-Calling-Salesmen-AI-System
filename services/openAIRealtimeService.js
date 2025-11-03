@@ -36,6 +36,8 @@ class OpenAIRealtimeService {
         openaiConnected: false,
         openaiConnecting: false,
         flushing: false,
+        sessionReady: false,
+        primed: false,
       });
 
       // Start the conversation with a spoken greeting (no OpenAI yet)
@@ -275,6 +277,17 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
       return;
     }
 
+    // Ensure the OpenAI session has been updated before committing audio
+    if (!connection.sessionReady) {
+      if (connection.pcmBuffer && connection.pcmBuffer.length > 0) {
+        clearTimeout(connection.commitTimer);
+        connection.commitTimer = setTimeout(() => {
+          this.flushAudioToOpenAI(callId).catch(err => DebugLogger.logCallError(callId, err, 'audio_flush_session_not_ready'));
+        }, 120);
+      }
+      return;
+    }
+
     if (connection.flushing) {
       // avoid overlapping flushes; try again shortly
       clearTimeout(connection.commitTimer);
@@ -317,9 +330,10 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
           type: 'input_audio_buffer.append',
           audio: padded.toString('base64')
         };
-        connection.openaiWs.send(JSON.stringify(audioAppendPad));
-        const commitPad = { type: 'input_audio_buffer.commit' };
-        connection.openaiWs.send(JSON.stringify(commitPad));
+        connection.openaiWs.send(JSON.stringify(audioAppendPad), () => {
+          const commitPad = { type: 'input_audio_buffer.commit' };
+          try { connection.openaiWs.send(JSON.stringify(commitPad)); } catch {}
+        });
         connection.hasCommittedAudio = true;
         connection.flushing = false;
         return;
@@ -344,10 +358,10 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
       type: 'input_audio_buffer.append',
       audio: pcm.toString('base64')
     };
-    connection.openaiWs.send(JSON.stringify(audioAppend));
-
-    const commit = { type: 'input_audio_buffer.commit' };
-    connection.openaiWs.send(JSON.stringify(commit));
+    connection.openaiWs.send(JSON.stringify(audioAppend), () => {
+      const commit = { type: 'input_audio_buffer.commit' };
+      try { connection.openaiWs.send(JSON.stringify(commit)); } catch {}
+    });
     connection.hasCommittedAudio = true;
     connection.flushing = false;
   }
@@ -393,20 +407,6 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
         }
       };
       openaiWs.send(JSON.stringify(sessionConfig));
-
-      // Prime the input buffer with a short silence to avoid 0ms commit errors
-      try {
-        const sr = conn?.sampleRateHz || 8000;
-        const primeMs = 240; // ~240ms of silence
-        const primeSamples = Math.ceil(sr * (primeMs / 1000));
-        const primeBytes = primeSamples * 2; // PCM16
-        const silence = Buffer.alloc(primeBytes);
-        openaiWs.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: silence.toString('base64') }));
-        openaiWs.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
-        console.log(`🔈 Primed OpenAI input buffer with ${primeBytes} bytes (~${primeMs}ms) of silence for ${callId}`);
-        const c = this.connections.get(callId);
-        if (c) c.hasCommittedAudio = true;
-      } catch {}
       connection.openaiConnected = true;
       connection.openaiConnecting = false;
     });
@@ -415,6 +415,34 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
       try {
         const message = JSON.parse(data.toString());
         console.log(`📨 OpenAI message for ${callId}:`, message.type);
+        if (message.type === 'session.updated') {
+          const conn = this.connections.get(callId);
+          if (conn) {
+            conn.sessionReady = true;
+            console.log(`✅ OpenAI session updated for ${callId}`);
+            if (!conn.primed) {
+              try {
+                const sr = conn.sampleRateHz || 8000;
+                const primeMs = 400; // ~400ms of silence to ensure stability
+                const primeSamples = Math.ceil(sr * (primeMs / 1000));
+                const primeBytes = primeSamples * 2; // PCM16
+                const silence = Buffer.alloc(primeBytes);
+                conn.openaiWs.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: silence.toString('base64') }), () => {
+                  try { conn.openaiWs.send(JSON.stringify({ type: 'input_audio_buffer.commit' })); } catch {}
+                });
+                console.log(`🔈 Primed OpenAI input buffer with ${primeBytes} bytes (~${primeMs}ms) of silence for ${callId}`);
+                conn.primed = true;
+                conn.hasCommittedAudio = true;
+              } catch {}
+            }
+            if (conn.pcmBuffer && conn.pcmBuffer.length > 0 && !conn.commitTimer) {
+              conn.commitTimer = setTimeout(() => {
+                this.flushAudioToOpenAI(callId).catch(err => DebugLogger.logCallError(callId, err, 'flush_after_session_ready'));
+              }, 80);
+            }
+          }
+          return;
+        }
         await this.handleOpenAIMessage(callId, message);
         if (message.type === 'error' && message.error && typeof message.error.message === 'string' && message.error.message.includes('buffer too small')) {
           // Try scheduling another flush with more audio
