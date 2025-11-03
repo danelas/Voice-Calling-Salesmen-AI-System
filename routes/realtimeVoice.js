@@ -19,7 +19,9 @@ router.post('/stream/:callId', (req, res) => {
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
-        <Stream url="wss://${req.get('host')}/websocket?callId=${callId}" />
+        <Stream url="wss://${req.get('host')}/websocket">
+            <Parameter name="callId" value="${callId}" />
+        </Stream>
     </Connect>
 </Response>`;
 
@@ -32,7 +34,9 @@ router.post('/stream/:callId', (req, res) => {
 function setupWebSocketServer(server) {
   const wss = new WebSocket.Server({ 
     server,
-    path: '/websocket'
+    path: '/websocket',
+    perMessageDeflate: false,
+    handleProtocols: () => 'audio'
   });
 
   console.log('🎙️ WebSocket server setup for realtime voice at /websocket');
@@ -42,29 +46,19 @@ function setupWebSocketServer(server) {
     
     const urlParts = req.url.split('/');
     const urlObj = new URL(req.url, 'http://localhost');
-    const callId = urlObj.searchParams.get('callId') || urlParts[urlParts.length - 1];
+    let callId = urlObj.searchParams.get('callId') || urlParts[urlParts.length - 1];
     
     console.log(`🔌 WebSocket connected for call ${callId} from URL: ${req.url}`);
     DebugLogger.logSuccess('WebSocket connected for call', { callId });
 
     try {
-      // Get call and lead data
-      const call = await prisma.call.findUnique({
-        where: { id: callId },
-        include: { lead: true }
-      });
-
-      if (!call) {
-        ws.close(1000, 'Call not found');
-        return;
-      }
-
       let streamSid = null;
+      let call = null;
 
       // Handle Twilio WebSocket messages
       ws.on('message', async (message) => {
         try {
-          const data = JSON.parse(message);
+          const data = JSON.parse(message.toString());
           console.log(`📞 Twilio message for ${callId}:`, data.event);
 
           switch (data.event) {
@@ -80,6 +74,30 @@ function setupWebSocketServer(server) {
               
               // Start OpenAI realtime conversation
               console.log(`🚀 Starting OpenAI realtime conversation for ${callId}`);
+              // Prefer callId from custom parameters if present
+              if (data.start.customParameters) {
+                let callIdFromParams = null;
+                if (Array.isArray(data.start.customParameters)) {
+                  const found = data.start.customParameters.find(p => p.name === 'callId');
+                  callIdFromParams = found ? found.value : null;
+                } else if (typeof data.start.customParameters === 'object') {
+                  callIdFromParams = data.start.customParameters.callId || null;
+                }
+                if (callIdFromParams) {
+                  callId = callIdFromParams;
+                  console.log(`🔖 Using callId from customParameters: ${callId}`);
+                }
+              }
+              // Fetch call/lead now
+              call = await prisma.call.findUnique({
+                where: { id: callId },
+                include: { lead: true }
+              });
+              if (!call) {
+                console.error(`❌ Call not found for callId ${callId}`);
+                ws.close(1000, 'Call not found');
+                return;
+              }
               await realtimeService.startRealtimeConversation(callId, call.lead, ws);
               if (streamSid) {
                 if (typeof realtimeService.setStreamSid === 'function') {
@@ -113,10 +131,28 @@ function setupWebSocketServer(server) {
         }
       });
 
-      ws.on('close', () => {
-        DebugLogger.logSuccess('WebSocket closed', { callId });
+      ws.on('close', (code, reason) => {
+        console.log(`🔌 WebSocket closed for ${callId}: code=${code} reason=${reason?.toString?.() || ''}`);
+        DebugLogger.logSuccess('WebSocket closed', { callId, code, reason: reason?.toString?.() || '' });
         realtimeService.endConversation(callId);
       });
+
+      ws.on('error', (err) => {
+        console.error(`❌ WebSocket error for ${callId}:`, err.message || err);
+        DebugLogger.logCallError(callId, err, 'twilio_websocket');
+      });
+
+      // Ensure we respond to Twilio pings promptly
+      ws.on('ping', (data) => {
+        try { ws.pong(data, false, true); } catch (_) {}
+      });
+      // Optionally keepalive (server -> Twilio)
+      const pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          try { ws.ping(); } catch (_) {}
+        }
+      }, 25000);
+      ws.on('close', () => clearInterval(pingInterval));
 
     } catch (error) {
       DebugLogger.logCallError(callId, error, 'websocket_setup');
