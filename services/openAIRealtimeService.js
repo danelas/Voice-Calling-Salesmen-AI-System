@@ -52,7 +52,7 @@ class OpenAIRealtimeService {
             modalities: ['text', 'audio'],
             instructions: this.buildRealtimeInstructions(leadData),
             voice: 'alloy', // Will be replaced with ElevenLabs
-            input_audio_format: 'pcm16',
+            input_audio_format: { type: 'pcm16', sample_rate_hz: 8000, channels: 1, endianness: 'little' },
             output_audio_format: 'pcm16',
             input_audio_transcription: {
               model: 'whisper-1'
@@ -95,17 +95,7 @@ class OpenAIRealtimeService {
         console.log(`🔌 OpenAI WebSocket closed for ${callId}:`, code, reason.toString());
       });
 
-      // Handle Twilio audio stream
-      twilioStream.on('media', (media) => {
-        if (openaiWs.readyState === WebSocket.OPEN) {
-          // Forward audio to OpenAI
-          const audioAppend = {
-            type: 'input_audio_buffer.append',
-            audio: media.payload
-          };
-          openaiWs.send(JSON.stringify(audioAppend));
-        }
-      });
+      // Twilio media is handled via realtimeVoice -> handleTwilioMedia
 
       // Start the conversation
       this.initiateGreeting(callId);
@@ -327,6 +317,19 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
     connection.commitTimer = null;
 
     if (!pcm || pcm.length === 0) return;
+
+    // Ensure at least 100ms of audio buffered before commit
+    const sampleRate = 8000; // Twilio Media Streams are 8kHz
+    const minSamples = Math.ceil(sampleRate * 0.1); // 100ms
+    const minBytes = minSamples * 2; // PCM16 = 2 bytes/sample
+    if (pcm.length < minBytes) {
+      // Re-append to buffer and re-schedule
+      connection.pcmBuffer = Buffer.concat([pcm, connection.pcmBuffer]);
+      connection.commitTimer = setTimeout(() => {
+        this.flushAudioToOpenAI(callId).catch(err => DebugLogger.logCallError(callId, err, 'audio_flush_reschedule'));
+      }, 120);
+      return;
+    }
 
     const audioAppend = {
       type: 'input_audio_buffer.append',
