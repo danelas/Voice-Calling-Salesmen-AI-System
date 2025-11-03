@@ -380,11 +380,12 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
             try { console.log(`🔊 Committing ${connection.pendingAppendBytes} bytes (~${ms}ms) to OpenAI for ${callId}`); } catch {}
             const commit = { type: 'input_audio_buffer.commit' };
             // small delay ensures server processed append before commit
-            setTimeout(() => { try { connection.openaiWs.send(JSON.stringify(commit)); } catch {} }, 15);
-            connection.pendingAppendBytes = 0;
-            connection.hasCommittedAudio = true;
-            connection.inputBufferOpen = false;
-            connection.flushing = false;
+            setTimeout(() => {
+              try { connection.openaiWs.send(JSON.stringify(commit)); } catch {}
+              connection.pendingAppendBytes = 0;
+              connection.hasCommittedAudio = true;
+              connection.flushing = false;
+            }, 15);
           });
         } else {
           connection.commitTimer = setTimeout(() => {
@@ -400,10 +401,12 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
       try { console.log(`🔊 Committing ${connection.pendingAppendBytes} bytes (~${ms}ms) to OpenAI for ${callId}`); } catch {}
       const commit = { type: 'input_audio_buffer.commit' };
       // small delay ensures server processed append before commit
-      setTimeout(() => { try { connection.openaiWs.send(JSON.stringify(commit)); } catch {} }, 15);
-      connection.pendingAppendBytes = 0;
-      connection.hasCommittedAudio = true;
-      connection.flushing = false;
+      setTimeout(() => {
+        try { connection.openaiWs.send(JSON.stringify(commit)); } catch {}
+        connection.pendingAppendBytes = 0;
+        connection.hasCommittedAudio = true;
+        connection.flushing = false;
+      }, 15);
     };
 
     // Directly append without unsupported 'start' primitive
