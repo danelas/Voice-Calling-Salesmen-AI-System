@@ -379,10 +379,11 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
             const ms = Math.round((connection.pendingAppendBytes / bytesPerSample) / sampleRate * 1000);
             try { console.log(`🔊 Committing ${connection.pendingAppendBytes} bytes (~${ms}ms) to OpenAI for ${callId}`); } catch {}
             const commit = { type: 'input_audio_buffer.commit' };
-            try { connection.openaiWs.send(JSON.stringify(commit)); } catch {}
-            connection.pendingAppendBytes = 0;
-            connection.hasCommittedAudio = true;
-            connection.flushing = false;
+            connection.openaiWs.send(JSON.stringify(commit), () => {
+              connection.pendingAppendBytes = 0;
+              connection.hasCommittedAudio = true;
+              connection.flushing = false;
+            });
           });
         } else {
           connection.commitTimer = setTimeout(() => {
@@ -397,10 +398,11 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
       const ms = Math.round((connection.pendingAppendBytes / bytesPerSample) / sampleRate * 1000);
       try { console.log(`🔊 Committing ${connection.pendingAppendBytes} bytes (~${ms}ms) to OpenAI for ${callId}`); } catch {}
       const commit = { type: 'input_audio_buffer.commit' };
-      try { connection.openaiWs.send(JSON.stringify(commit)); } catch {}
-      connection.pendingAppendBytes = 0;
-      connection.hasCommittedAudio = true;
-      connection.flushing = false;
+      connection.openaiWs.send(JSON.stringify(commit), () => {
+        connection.pendingAppendBytes = 0;
+        connection.hasCommittedAudio = true;
+        connection.flushing = false;
+      });
     };
 
     // Directly append without unsupported 'start' primitive
