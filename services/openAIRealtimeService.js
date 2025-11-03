@@ -39,10 +39,12 @@ class OpenAIRealtimeService {
         conversationHistory: [],
         streamSid: null,
         pcmBuffer: Buffer.alloc(0),
+        ulawBuffer: Buffer.alloc(0),
         commitTimer: null,
         lastAudioAt: 0,
         mediaEncoding: (mediaInfo && mediaInfo.encoding) ? mediaInfo.encoding : 'audio/x-mulaw;rate=8000',
         sampleRateHz: (mediaInfo && mediaInfo.sampleRate) ? mediaInfo.sampleRate : 8000,
+        inputFormatType: (mediaInfo && mediaInfo.encoding && String(mediaInfo.encoding).toLowerCase().includes('mulaw')) ? 'g711_ulaw' : 'pcm16',
         hasCommittedAudio: false,
         openaiConnected: false,
         openaiConnecting: false,
@@ -50,6 +52,7 @@ class OpenAIRealtimeService {
         sessionReady: false,
         primed: false,
         pendingAppendBytes: 0,
+        inputBufferOpen: false,
       });
 
       // Start the conversation with a spoken greeting (no OpenAI yet)
@@ -247,6 +250,11 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
       if (enc.includes('mulaw')) {
         // Decode mu-law to PCM16
         chunk = muLawBase64ToPCM16(muLawBase64);
+        // Also keep raw ulaw bytes for direct send to OpenAI when using g711_ulaw
+        try {
+          const raw = Buffer.from(muLawBase64, 'base64');
+          connection.ulawBuffer = Buffer.concat([connection.ulawBuffer, raw]);
+        } catch {}
       } else {
         // Already PCM16 little-endian
         chunk = Buffer.from(muLawBase64, 'base64');
@@ -324,45 +332,58 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
     }
     connection.flushing = true;
 
-    const pcm = connection.pcmBuffer;
-    connection.pcmBuffer = Buffer.alloc(0);
+    const useUlaw = (connection.inputFormatType === 'g711_ulaw');
+    const buf = useUlaw ? connection.ulawBuffer : connection.pcmBuffer;
+    const bytesPerSample = useUlaw ? 1 : 2;
+    if (useUlaw) {
+      connection.ulawBuffer = Buffer.alloc(0);
+    } else {
+      connection.pcmBuffer = Buffer.alloc(0);
+    }
     clearTimeout(connection.commitTimer);
     connection.commitTimer = null;
 
     // Nothing new to append; release lock and try later
-    if (!pcm || pcm.length === 0) { connection.flushing = false; return; }
+    if (!buf || buf.length === 0) { connection.flushing = false; return; }
 
     const sampleRate = this.connections.get(callId)?.sampleRateHz || 8000;
     const thresholdMs = 100;
     const minSamples = Math.ceil(sampleRate * (thresholdMs / 1000));
-    const minBytes = minSamples * 2; // PCM16
+    const minBytes = minSamples * bytesPerSample; // bytes per sample depends on format
 
     // 1) Always append what we have first
-    const appendBytes = pcm.length;
-    const audioAppend = { type: 'input_audio_buffer.append', audio: pcm.toString('base64') };
-    connection.openaiWs.send(JSON.stringify(audioAppend), () => {
+    const appendBytes = buf.length;
+    const audioAppend = { type: 'input_audio_buffer.append', audio: buf.toString('base64') };
+    try { console.log(`➡️ append ${appendBytes} bytes format=${useUlaw ? 'g711_ulaw' : 'pcm16'} (pending before=${connection.pendingAppendBytes}) for ${callId}`); } catch {}
+    const doAfterAppend = () => {
       // Track pending audio now on client side
       connection.pendingAppendBytes = (connection.pendingAppendBytes || 0) + appendBytes;
+      try {
+        const curMs = Math.round((connection.pendingAppendBytes / bytesPerSample) / sampleRate * 1000);
+        console.log(`🧮 pending=${connection.pendingAppendBytes} bytes (~${curMs}ms) after append for ${callId}`);
+      } catch {}
 
       // 2) If we still don't have enough total appended since last commit, schedule another flush without committing
       if (connection.pendingAppendBytes < minBytes) {
         // If we are very close (<=10ms), pad and commit
-        const currentMs = Math.round((connection.pendingAppendBytes / 2) / sampleRate * 1000);
+        const currentMs = Math.round((connection.pendingAppendBytes / bytesPerSample) / sampleRate * 1000);
         const gapMs = thresholdMs - currentMs;
         if (gapMs > 0 && gapMs <= 10) {
           const padSamples = Math.ceil(sampleRate * (gapMs / 1000));
-          const padBytes = padSamples * 2;
-          const silence = Buffer.alloc(padBytes);
+          const padBytes = padSamples * bytesPerSample;
+          const silenceByte = useUlaw ? 0xFF : 0x00;
+          const silence = Buffer.alloc(padBytes, silenceByte);
           try { console.log(`🔇 Padding ${padBytes} bytes (~${gapMs}ms) before commit for ${callId}`); } catch {}
           const padAppend = { type: 'input_audio_buffer.append', audio: silence.toString('base64') };
           connection.openaiWs.send(JSON.stringify(padAppend), () => {
             connection.pendingAppendBytes += padBytes;
-            const ms = Math.round((connection.pendingAppendBytes / 2) / sampleRate * 1000);
+            const ms = Math.round((connection.pendingAppendBytes / bytesPerSample) / sampleRate * 1000);
             try { console.log(`🔊 Committing ${connection.pendingAppendBytes} bytes (~${ms}ms) to OpenAI for ${callId}`); } catch {}
             const commit = { type: 'input_audio_buffer.commit' };
             try { connection.openaiWs.send(JSON.stringify(commit)); } catch {}
             connection.pendingAppendBytes = 0;
             connection.hasCommittedAudio = true;
+            connection.inputBufferOpen = false;
             connection.flushing = false;
           });
         } else {
@@ -375,14 +396,26 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
       }
 
       // 3) We have enough pending; commit now
-      const ms = Math.round((connection.pendingAppendBytes / 2) / sampleRate * 1000);
+      const ms = Math.round((connection.pendingAppendBytes / bytesPerSample) / sampleRate * 1000);
       try { console.log(`🔊 Committing ${connection.pendingAppendBytes} bytes (~${ms}ms) to OpenAI for ${callId}`); } catch {}
       const commit = { type: 'input_audio_buffer.commit' };
       try { connection.openaiWs.send(JSON.stringify(commit)); } catch {}
       connection.pendingAppendBytes = 0;
       connection.hasCommittedAudio = true;
+      connection.inputBufferOpen = false;
       connection.flushing = false;
-    });
+    };
+
+    // Ensure input buffer is started before first append in a segment
+    if (!connection.inputBufferOpen) {
+      try { console.log(`▶️ start input buffer for ${callId}`); } catch {}
+      connection.openaiWs.send(JSON.stringify({ type: 'input_audio_buffer.start' }), () => {
+        connection.inputBufferOpen = true;
+        connection.openaiWs.send(JSON.stringify(audioAppend), doAfterAppend);
+      });
+    } else {
+      connection.openaiWs.send(JSON.stringify(audioAppend), doAfterAppend);
+    }
   }
 
   /**
@@ -407,15 +440,15 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
       DebugLogger.logSuccess('OpenAI Realtime connected', { callId });
 
       const conn = this.connections.get(callId);
-      // Always use PCM16 to avoid format mismatches; decode mulaw to PCM16 ourselves
-      let inputFormat = { type: 'pcm16', sample_rate_hz: (conn?.sampleRateHz || 8000), channels: 1, endianness: 'little' };
+      // Choose input format based on Twilio media
+      const fmt = (conn?.inputFormatType === 'g711_ulaw') ? 'g711_ulaw' : 'pcm16';
       const sessionConfig = {
         type: 'session.update',
         session: {
           modalities: ['text', 'audio'],
           instructions: this.buildRealtimeInstructions(conn.leadData),
           voice: 'alloy',
-          input_audio_format: 'pcm16',
+          input_audio_format: fmt,
           output_audio_format: 'pcm16',
           input_audio_transcription: { model: 'whisper-1' },
           tools: [],
@@ -438,9 +471,30 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
           if (conn) {
             conn.sessionReady = true;
             console.log(`✅ OpenAI session updated for ${callId}`);
+            // Prime input buffer once to avoid early 0ms commits; respect current input format
             if (!conn.primed) {
-              conn.primed = true;
-              console.log(`🟢 OpenAI session ready (no priming) for ${callId}`);
+              try {
+                const bytesPerSample = (conn.inputFormatType === 'g711_ulaw') ? 1 : 2;
+                const sr = conn.sampleRateHz || 8000;
+                const primeMs = 240; // ~240ms of priming
+                const primeSamples = Math.ceil(sr * (primeMs / 1000));
+                const primeBytes = primeSamples * bytesPerSample;
+                const silenceByte = (conn.inputFormatType === 'g711_ulaw') ? 0xFF : 0x00; // μ-law silence is 0xFF
+                const silence = Buffer.alloc(primeBytes, silenceByte);
+                conn.openaiWs.send(JSON.stringify({ type: 'input_audio_buffer.start' }), () => {
+                  conn.inputBufferOpen = true;
+                  conn.openaiWs.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: silence.toString('base64') }), () => {
+                    try { conn.openaiWs.send(JSON.stringify({ type: 'input_audio_buffer.commit' })); } catch {}
+                    console.log(`🔈 Primed OpenAI input buffer with ${primeBytes} bytes (~${primeMs}ms) of ${conn.inputFormatType} for ${callId}`);
+                    conn.hasCommittedAudio = true;
+                    conn.pendingAppendBytes = 0;
+                    conn.inputBufferOpen = false;
+                    conn.primed = true;
+                  });
+                });
+              } catch (e) {
+                console.warn(`⚠️ Prime failed for ${callId}:`, e?.message || e);
+              }
             }
             if (conn.pcmBuffer && conn.pcmBuffer.length > 0 && !conn.commitTimer) {
               conn.commitTimer = setTimeout(() => {
