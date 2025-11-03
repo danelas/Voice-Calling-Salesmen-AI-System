@@ -49,6 +49,7 @@ class OpenAIRealtimeService {
         flushing: false,
         sessionReady: false,
         primed: false,
+        pendingAppendBytes: 0,
       });
 
       // Start the conversation with a spoken greeting (no OpenAI yet)
@@ -328,67 +329,60 @@ Remember: You're having a real conversation, not reading a script. Use the lead 
     clearTimeout(connection.commitTimer);
     connection.commitTimer = null;
 
-    if (!pcm || pcm.length === 0) return;
+    // Nothing new to append; release lock and try later
+    if (!pcm || pcm.length === 0) { connection.flushing = false; return; }
 
-    // Ensure at least ~100ms of audio buffered before commit
     const sampleRate = this.connections.get(callId)?.sampleRateHz || 8000;
     const thresholdMs = 100;
     const minSamples = Math.ceil(sampleRate * (thresholdMs / 1000));
-    const minBytes = minSamples * 2; // PCM16 bytes/sample
-    const currentMs = Math.round((pcm.length / 2) / sampleRate * 1000);
-    if (pcm.length < minBytes) {
-      // If we are very close (<=10ms), pad with silence to reach threshold
-      const gapMs = thresholdMs - currentMs;
-      if (gapMs > 0 && gapMs <= 10) {
-        const padSamples = Math.ceil(sampleRate * (gapMs / 1000));
-        const padBytes = padSamples * 2;
-        const padded = Buffer.concat([pcm, Buffer.alloc(padBytes)]);
-        try {
-          console.log(`🔇 Padding ${padBytes} bytes (~${gapMs}ms) before commit for ${callId}`);
-        } catch {}
-        // Replace pcm with padded buffer for this commit
-        connection.pcmBuffer = Buffer.alloc(0);
-        clearTimeout(connection.commitTimer);
-        connection.commitTimer = null;
+    const minBytes = minSamples * 2; // PCM16
 
-        const audioAppendPad = {
-          type: 'input_audio_buffer.append',
-          audio: padded.toString('base64')
-        };
-        connection.openaiWs.send(JSON.stringify(audioAppendPad), () => {
-          const commitPad = { type: 'input_audio_buffer.commit' };
-          try { connection.openaiWs.send(JSON.stringify(commitPad)); } catch {}
-        });
-        connection.hasCommittedAudio = true;
-        connection.flushing = false;
+    // 1) Always append what we have first
+    const appendBytes = pcm.length;
+    const audioAppend = { type: 'input_audio_buffer.append', audio: pcm.toString('base64') };
+    connection.openaiWs.send(JSON.stringify(audioAppend), () => {
+      // Track pending audio now on client side
+      connection.pendingAppendBytes = (connection.pendingAppendBytes || 0) + appendBytes;
+
+      // 2) If we still don't have enough total appended since last commit, schedule another flush without committing
+      if (connection.pendingAppendBytes < minBytes) {
+        // If we are very close (<=10ms), pad and commit
+        const currentMs = Math.round((connection.pendingAppendBytes / 2) / sampleRate * 1000);
+        const gapMs = thresholdMs - currentMs;
+        if (gapMs > 0 && gapMs <= 10) {
+          const padSamples = Math.ceil(sampleRate * (gapMs / 1000));
+          const padBytes = padSamples * 2;
+          const silence = Buffer.alloc(padBytes);
+          try { console.log(`🔇 Padding ${padBytes} bytes (~${gapMs}ms) before commit for ${callId}`); } catch {}
+          const padAppend = { type: 'input_audio_buffer.append', audio: silence.toString('base64') };
+          connection.openaiWs.send(JSON.stringify(padAppend), () => {
+            connection.pendingAppendBytes += padBytes;
+            const ms = Math.round((connection.pendingAppendBytes / 2) / sampleRate * 1000);
+            try { console.log(`🔊 Committing ${connection.pendingAppendBytes} bytes (~${ms}ms) to OpenAI for ${callId}`); } catch {}
+            const commit = { type: 'input_audio_buffer.commit' };
+            try { connection.openaiWs.send(JSON.stringify(commit)); } catch {}
+            connection.pendingAppendBytes = 0;
+            connection.hasCommittedAudio = true;
+            connection.flushing = false;
+          });
+        } else {
+          connection.commitTimer = setTimeout(() => {
+            this.flushAudioToOpenAI(callId).catch(err => DebugLogger.logCallError(callId, err, 'audio_flush_reschedule'));
+          }, 60);
+          connection.flushing = false;
+        }
         return;
       }
 
-      // Not enough audio yet: re-append and re-schedule
-      connection.pcmBuffer = Buffer.concat([pcm, connection.pcmBuffer]);
-      connection.commitTimer = setTimeout(() => {
-        this.flushAudioToOpenAI(callId).catch(err => DebugLogger.logCallError(callId, err, 'audio_flush_reschedule'));
-      }, 60);
-      connection.flushing = false;
-      return;
-    }
-
-    // Minimal debug for audio commit size
-    try {
-      const ms = Math.round((pcm.length / 2) / sampleRate * 1000);
-      console.log(`🔊 Committing ${pcm.length} bytes (~${ms}ms) to OpenAI for ${callId}`);
-    } catch {}
-
-    const audioAppend = {
-      type: 'input_audio_buffer.append',
-      audio: pcm.toString('base64')
-    };
-    connection.openaiWs.send(JSON.stringify(audioAppend), () => {
+      // 3) We have enough pending; commit now
+      const ms = Math.round((connection.pendingAppendBytes / 2) / sampleRate * 1000);
+      try { console.log(`🔊 Committing ${connection.pendingAppendBytes} bytes (~${ms}ms) to OpenAI for ${callId}`); } catch {}
       const commit = { type: 'input_audio_buffer.commit' };
       try { connection.openaiWs.send(JSON.stringify(commit)); } catch {}
+      connection.pendingAppendBytes = 0;
+      connection.hasCommittedAudio = true;
+      connection.flushing = false;
     });
-    connection.hasCommittedAudio = true;
-    connection.flushing = false;
   }
 
   /**
